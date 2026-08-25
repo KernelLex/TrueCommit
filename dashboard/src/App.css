@@ -577,6 +577,97 @@
   gap: 0.3rem;
 }
 
+/* packet P9 — the queue with real buttons */
+
+.review-item-legal {
+  border-left-color: var(--danger);
+}
+
+.review-item-handoff {
+  border-left-color: var(--accent);
+}
+
+.review-item-paused {
+  border-left-color: var(--text-faint);
+}
+
+.review-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}
+
+.review-meta strong {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-weight: 700;
+}
+
+.review-warn {
+  margin-top: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  background: rgba(242, 184, 75, 0.08);
+  border: 1px solid rgba(242, 184, 75, 0.25);
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+
+.review-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}
+
+.review-actions .review-ts {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+}
+
+.btn-approve {
+  border-color: rgba(52, 211, 153, 0.4);
+  color: var(--good);
+}
+
+.btn-reject {
+  border-color: rgba(248, 113, 113, 0.4);
+  color: var(--danger);
+}
+
+.btn-neutral {
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+
+.review-evidence {
+  margin-top: 0.55rem;
+  font-size: 0.8rem;
+}
+
+.review-evidence summary {
+  cursor: pointer;
+  color: var(--text-dim);
+}
+
+.review-evidence pre {
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
 /* ---------- system health ---------- */
 
 .health-row {

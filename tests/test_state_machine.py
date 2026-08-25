@@ -23,6 +23,25 @@ ALL_EVENT_TYPES = [
     "promise_kept", "promise_broken", "dispute_raised", "delivery_rejected", "escalation_exhausted",
     "something_unrecognized",
 ]
+"""THE PIPELINE'S EVENT VOCABULARY — deliberately excludes `human_resolution`.
+
+Packet P9 added one event that can move a terminal state (a human closing out a
+handoff they were handed). It is excluded from this pool, and from the 1000-walk
+termination fuzz below, because this pool models *event streams the pipeline can
+actually produce*: `human_resolution` is not one of them. Nothing in `engine/`
+emits it (`test_integration.py::test_the_runner_never_emits_a_human_resolution_event`)
+and `POST /events` refuses it
+(`test_review_queue.py::test_human_resolution_cannot_be_injected_through_the_general_event_route`),
+so a walk containing it would be testing a stream that cannot exist.
+
+Excluding it is the STRICTER choice, not the convenient one. Including it would
+have weakened the two immutability tests below into "terminal states are immune
+to everything except the event we just added"; excluding it keeps them at
+"terminal states are immune to every event the pipeline can produce", and the
+exception is pinned separately, from both ends, by
+`test_human_resolution_is_the_one_event_that_moves_a_terminal_state` and by the
+two tests named above that prove it has exactly one door.
+"""
 
 
 def entity(**overrides) -> sm.EntityState:
@@ -219,6 +238,78 @@ def test_escalation_ladder_is_capped_and_forces_handoff():
     e = entity(state="ESCALATE_4")
     e = sm.transition(e, "promise_broken", {}, NOW)
     assert e.state == "HUMAN_HANDOFF"
+
+
+# ---------------------------------------------------------------------------
+# 4. Terminal-state immutability, and its ONE exception (packet P9)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("terminal_state", sorted(sm.TERMINAL_STATES))
+@pytest.mark.parametrize("event_type", ALL_EVENT_TYPES)
+def test_every_terminal_state_is_immune_to_every_pipeline_event(terminal_state, event_type):
+    """The general law, stated the strong way: 4 terminal states x the whole
+    pipeline event vocabulary, none of which moves anything. `human_resolution`
+    is not in that vocabulary — see ALL_EVENT_TYPES' docstring."""
+    e = entity(state=terminal_state, escalate_stage=4, retry_count=1, invoice_amount_inr=40000)
+    result = sm.transition(e, event_type, {"amount_inr": 40000, "resolution": "recovered"}, NOW)
+    assert result.state == terminal_state
+
+
+def test_the_fuzz_pool_deliberately_excludes_the_one_exception():
+    assert sm.HUMAN_RESOLUTION_EVENT not in ALL_EVENT_TYPES
+    assert sm.HUMAN_RESOLVABLE_STATES < sm.TERMINAL_STATES
+
+
+@pytest.mark.parametrize("start_state", sorted(sm.HUMAN_RESOLVABLE_STATES))
+@pytest.mark.parametrize(
+    "resolution,expected", [("recovered", "KEPT"), ("written_off", "CLEAN_LOSS")]
+)
+def test_human_resolution_is_the_one_event_that_moves_a_terminal_state(
+    start_state, resolution, expected
+):
+    """A human closing out the case they were handed. This exists precisely
+    because a HUMAN is acting: without it, HUMAN_HANDOFF is a state the system
+    can never close, which fails CLAUDE.md law 5's "no silent deaths" as badly
+    as a loop would."""
+    e = entity(state=start_state)
+    result = sm.transition(e, sm.HUMAN_RESOLUTION_EVENT, {"resolution": resolution}, NOW)
+    assert result.state == expected
+
+
+@pytest.mark.parametrize("already_closed", ["KEPT", "CLEAN_LOSS"])
+def test_human_resolution_cannot_reopen_an_already_closed_outcome(already_closed):
+    """The exception is scoped to the two states that are *waiting on a human*.
+    KEPT and CLEAN_LOSS are already resolved, and stay immutable to it."""
+    for resolution in ("recovered", "written_off"):
+        e = entity(state=already_closed)
+        assert sm.transition(e, sm.HUMAN_RESOLUTION_EVENT, {"resolution": resolution}, NOW).state == already_closed
+
+
+@pytest.mark.parametrize("start_state", NON_TERMINAL_STATES)
+def test_human_resolution_does_nothing_from_a_live_state(start_state):
+    """It closes handoffs; it is not a "set this entity's state" primitive that
+    could short-circuit a live ladder."""
+    e = entity(state=start_state)
+    result = sm.transition(e, sm.HUMAN_RESOLUTION_EVENT, {"resolution": "recovered"}, NOW)
+    assert result.state == start_state
+
+
+def test_a_malformed_human_resolution_moves_nothing():
+    for payload in ({}, {"resolution": None}, {"resolution": "partially"}, {"resolution": "KEPT"}):
+        e = entity(state="HUMAN_HANDOFF")
+        assert sm.transition(e, sm.HUMAN_RESOLUTION_EVENT, payload, NOW).state == "HUMAN_HANDOFF"
+
+
+def test_a_human_resolved_entity_is_terminal_again_immediately():
+    """One click, one move. The reopened-then-closed entity is not left in a
+    state that a second `human_resolution` could keep flipping."""
+    e = sm.transition(entity(state="HUMAN_HANDOFF"), sm.HUMAN_RESOLUTION_EVENT, {"resolution": "recovered"}, NOW)
+    assert e.state == "KEPT"
+    e = sm.transition(e, sm.HUMAN_RESOLUTION_EVENT, {"resolution": "written_off"}, NOW)
+    assert e.state == "KEPT"
+    for kind in sm.OUTBOUND_KINDS:
+        assert not sm.check_bounds(e, kind, {"amount_inr": 40000}, NOW).allowed
 
 
 def test_hard_step_cap_forces_termination_even_with_only_silent_events():
