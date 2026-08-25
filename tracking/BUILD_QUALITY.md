@@ -14,8 +14,8 @@ Kept truthful. Update whenever a check is actually re-run — don't carry forwar
 - Last full `pytest` run: 2026-08-26, all green, ~1.1s
 
 ## Secrets hygiene
-- Grep check for `rzp_` / `sk-ant` in tracked files: not yet run (no code committed yet)
-- Last check date: —
+- Grep check for `rzp_` / `sk-ant` in tracked files: ✅ clean — `git grep -nE "rzp_(test|live)_[A-Za-z0-9]|sk-ant-api" -- .`
+- Last check date: 2026-08-26
 - `.env` gitignored: ✅ (`.gitignore` created Phase A setup, 2026-08-26)
 - `.env.example` contains placeholders only, no real values: ✅ (verified at creation, 2026-08-26)
 
