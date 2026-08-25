@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+dashboard/dist/
+dashboard/.vite/
+*.egg-info/
+.DS_Store
+metrics/*.json
+!metrics/.gitkeep
