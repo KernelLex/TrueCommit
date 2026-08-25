@@ -3,6 +3,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.cache/
 node_modules/
 dashboard/dist/
 dashboard/.vite/
@@ -12,3 +13,4 @@ metrics/*.json
 !metrics/.gitkeep
 rzp.csv
 *.secret
+.claude/settings.local.json

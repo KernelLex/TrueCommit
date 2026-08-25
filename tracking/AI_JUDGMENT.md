@@ -19,6 +19,10 @@ One model everywhere: **Claude Sonnet (`claude-sonnet-4-6`) via the Anthropic AP
 
 **Status as of this entry (Phase A, updated 2026-08-26):** rows 1–3 are fully built and tested-as-far-as-possible without a key — `engine/perception/{triage,extractor,cart_cause}.py` + `engine/perception/client.py` (thin wrapper around `client.messages.parse(..., output_format=<pydantic model>)`, model `claude-sonnet-5`) + all 5 prompt files + `eval/{triage_eval,extraction_eval}.py`. Every module imports cleanly and fails with a clear `RuntimeError` (not a crash) when called without `ANTHROPIC_API_KEY` — see `tests/test_perception.py`. Rows 4–6 (drafting, dispute summary, Auditor) are not yet built. Nothing here has made a real API call yet; `ANTHROPIC_API_KEY` still not provided.
 
+**Update 2026-08-26 (packet P1 — rows 1–3 are now provider-pluggable):** perception calls no longer hard-wire the LLM. `engine/perception/providers/` resolves a backend per call (argument → `PK_PERCEPTION_PROVIDER` → default `heuristic`), and rows 1–3 route through it with unchanged public signatures. The Claude path above is intact, moved verbatim into `providers/anthropic_provider.py` and selected by `--provider anthropic` / the env var. Two consequences for this file's question ("right tool in the right place"):
+- **The default is now NOT an LLM.** Perception's default backend is the rules provider — see (b) row 7. An LLM is opt-in, per call, and is the only thing in the system that costs money to run.
+- **Every accuracy claim is now per provider and has a baseline.** `metrics/extraction_accuracy_{provider}.json` / `metrics/triage_accuracy_{provider}.json`. "Extraction is X% accurate" is a weak claim on its own; "X% vs a rules baseline of 97.7% in-sample" says whether the LLM is earning its cost. Both evals refuse `--provider oracle` (ground-truth replay) so no circular number can enter `metrics/`.
+
 ---
 
 ## (b) Every place we deliberately do NOT use AI
@@ -31,6 +35,7 @@ Per master doc §2.2 — say this list out loud in the video:
 4. **Bounds enforcement** (caps, cooldowns, stop rules) — hard-coded constants, cannot be prompted around — ✅ built + tested 2026-08-26, all 8 bounds from master doc §3.4
 5. **Money movement** — Razorpay APIs only, triggered by state machine only — ⬜ `engine/action/razorpay_client.py` not yet built (Phase C, needs Razorpay TEST keys)
 6. **Metrics computation** — plain Python, reproducible (`eval/run_arms.py`) — ⬜ not yet built (Phase E)
+7. **Perception's DEFAULT backend** — `engine/perception/providers/heuristic.py`, pure-Python rules, zero deps, zero cost, deterministic — ✅ built + tested 2026-08-26. Not an anti-AI position: it is the measured baseline an LLM has to beat on the same hand labels, and it means the whole system runs offline on a stranger's machine with no key. Measured in-sample (rules authored with the labels visible, no held-out split): extraction 97.7% (n=44, gate 85% → PASS), triage 71.7% (n=60, gate 90% → FAIL; 91.7% on the 24 invoices that have a thread, ~ceiling on the 36 that don't — see BUILD_LOG 2026-08-26). Where an LLM is genuinely worth its cost on this dataset is the open question those two numbers exist to answer honestly.
 
 **The design law: the LLM can SEE and SPEAK, never SPEND.** Worst-case LLM hallucination = an awkward message, never a wrong debit. That's the blast-radius answer if asked.
 
