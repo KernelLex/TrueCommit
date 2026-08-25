@@ -1,5 +1,7 @@
 # PROGRESS.md — Promise Keeper build status
-### Last updated: 2026-08-26 · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
+### Last updated: 2026-08-26 (post-demo) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
+
+> **Handing over between Claude sessions? Read `HANDOVER.md` first** — it carries the build mechanism (three-tier orchestration), the laws, the resume procedure, and the in-flight packet specs.
 
 The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG = what broke, TRACK_BAR = the judging bar, AI_JUDGMENT = where AI is/isn't used, BUILD_QUALITY = tests/reproducibility, DECISIONS = every deviation, PROBLEM_TASTE = claims + sources).
 
@@ -55,9 +57,20 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 - Then: Day 7 auditor + TTS + `v1.0-freeze` tag → Day 8 three-arm metrics lock → Day 9 video + README → Day 10 submit
 
 ## ⚠ OPEN RISKS
-- Local-LLM (qwen) accuracy vs the gates — being **measured right now**, not guessed
+- Local-LLM (qwen) accuracy vs the gates — being **measured right now**, not guessed. Early live probe: 7b nails levels (incl. the hard L3 partial-payment case) but can scramble which number goes in which JSON field — P5's normalization + the per-provider accuracy table exist for exactly this, and the design law means a scrambled field can never touch money
 - Mandate execute/revoke realness — needs the one manual registration authorization during demo prep (path documented in the client docstring)
 - Dashboard funnel movement depends on P2 landing
+
+## 🎬 SANDBOX DEMO RUN (2026-08-26, from a clean worktree at commit 85ee9d0 — reproducible by anyone)
+All eight beats executed live against the merged code; every number below was produced during the run, not quoted from memory:
+1. **Test suite**: 169/169 passed
+2. **Extraction eval** (heuristic, offline, zero cost): 97.7% PASS with per-level P/R table + in-sample caveat printed by the tool itself
+3. **Triage eval**: 71.7% headline / **91.7% on threaded invoices** / 61.1% info-ceiling split printed by the tool itself
+4. **Determinism**: two 45-day seeded sim runs → byte-identical (diff empty), 408 events
+5. **Full lifecycle through the real pipeline** (TestClient): INV-001 triage → Hinglish L1 extraction → bounds-checked mandate offer → executed → KEPT, trust Beta(2,2)→(3,2); INV-031 dispute → evidence packet → ladder frozen (follow-up event returns no action, state terminal); INV-047 ₹4.5L mandate **blocked by the cap** with the block reason in the audit trail + automatic link fallback; INV-001's full audit timeline printed (every entry logged before its action executed)
+6. **Tier-0 reserve beat**: cart C-09 payment_failed → reserve pre-check → KEPT with **0 touches**
+7. **Real Razorpay objects created live**: payment link `rzp.io/rzp/EfWzyui` + UPI mandate registration `rzp.io/rzp/nx7meJ3I` (TEST mode, real short_urls)
+8. **Local LLM live**: qwen2.5:7b classified the L3 partial-payment message correctly in 1.8s on CPU (with the field-scramble finding noted above, recorded honestly)
 
 ---
 
