@@ -59,6 +59,10 @@ export const api = {
   // Does not exist yet (a later packet adds it) — callers must expect this
   // to reject and handle it gracefully (see App.jsx's time-warp handlers).
   advance: (days) => request('/advance', { method: 'POST', body: JSON.stringify({ days }) }),
+  // Packet P6: config/agents.yaml surface + live provider/sentinel/cache
+  // status — everything the System Health "Agent parameters" and live
+  // status cards render comes from this one call.
+  config: () => request('/config'),
 }
 
 export { ApiError }

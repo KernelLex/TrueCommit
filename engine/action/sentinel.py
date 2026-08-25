@@ -4,6 +4,18 @@ visible dead-letter queue so nothing vanishes, a link-open timer that never
 just assumes delivery, and a circuit breaker for sustained outages.
 
 "No failure is ever silent, and every failure has a designed next step."
+
+TUNABLE (packet P6, config/agents.yaml `sentinel:` section)
+-------------------------------------------------------------------------
+The four module constants below are still the source of truth for every
+caller that constructs `Sentinel()` with no arguments (this file's own
+tests, and `engine/integration/runner.py`'s `WorldRunner` — unchanged,
+zero behaviour difference). `Sentinel.__init__` now also accepts each one
+as an optional keyword, defaulting to its module constant, so a config-
+driven caller can override them without this file needing to know
+`config/agents.yaml` exists. `engine.config.build_sentinel()` is that
+caller: it reads the yaml (falling back to these same constants wherever a
+key is absent) and constructs a real, working `Sentinel` from the result.
 """
 
 import datetime as dt
@@ -29,7 +41,23 @@ class DeadLetter(BaseModel):
 
 
 class Sentinel:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        max_retries: int = MAX_RETRIES,
+        backoff_minutes: list[int] | None = None,
+        link_open_timeout_hours: float = LINK_OPEN_TIMEOUT_HOURS,
+        circuit_breaker_threshold: int = CIRCUIT_BREAKER_THRESHOLD,
+    ) -> None:
+        """Every parameter defaults to this module's own constant. Calling
+        `Sentinel()` with no arguments — every existing call site — is
+        unaffected; only a caller that passes these explicitly (in
+        practice, `engine.config.build_sentinel()`) changes behaviour."""
+        self.max_retries = max_retries
+        self.backoff_schedule = list(backoff_minutes) if backoff_minutes is not None else list(BACKOFF_MINUTES)
+        self.link_open_timeout_hours = link_open_timeout_hours
+        self.circuit_breaker_threshold = circuit_breaker_threshold
+
         self.attempts: dict[str, int] = {}
         self.dead_letter: list[DeadLetter] = []
         self.link_sent_at: dict[str, dt.datetime] = {}
@@ -47,10 +75,10 @@ class Sentinel:
         n = self.attempts.get(action_id, 0) + 1
         self.attempts[action_id] = n
         self.consecutive_failures += 1
-        if self.consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
+        if self.consecutive_failures >= self.circuit_breaker_threshold:
             self.circuit_open = True
 
-        if n > MAX_RETRIES:
+        if n > self.max_retries:
             self.dead_letter.append(DeadLetter(action_id=action_id, entity_id=entity_id, kind=kind, attempts=n, last_error=error, ts=now))
             self.attempts.pop(action_id, None)
             return "dead_letter"
@@ -58,8 +86,8 @@ class Sentinel:
 
     def backoff_minutes(self, action_id: str) -> int:
         n = max(self.attempts.get(action_id, 1), 1)
-        idx = min(n, len(BACKOFF_MINUTES)) - 1
-        return BACKOFF_MINUTES[idx]
+        idx = min(n, len(self.backoff_schedule)) - 1
+        return self.backoff_schedule[idx]
 
     def should_pause_outbound(self) -> bool:
         return self.circuit_open
@@ -78,4 +106,4 @@ class Sentinel:
         sent_at = self.link_sent_at.get(action_id)
         if sent_at is None or action_id in self.link_opened:
             return False
-        return (now - sent_at).total_seconds() / 3600.0 >= LINK_OPEN_TIMEOUT_HOURS
+        return (now - sent_at).total_seconds() / 3600.0 >= self.link_open_timeout_hours

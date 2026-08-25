@@ -1,0 +1,94 @@
+# config/agents.yaml — the tunable-parameters surface for the five mesh
+# agents (master doc §7: Perception / Judgment / Action / Sentinel /
+# Auditor). Loaded by engine/config.py.
+#
+# EVERY VALUE BELOW MATCHES TODAY'S BUILTIN DEFAULT EXACTLY. A fresh
+# checkout with this file untouched (or deleted) behaves byte-identically
+# to before this file existed — that's the acceptance bar for this packet,
+# not a coincidence. Loosen a value here to actually change behaviour.
+#
+# PRECEDENCE (perception.* and sentinel.*), most specific wins:
+#
+#   explicit function argument      (programmatic callers / tests only)
+#       > environment variable, IF EXPLICITLY SET
+#           > this file, IF THE KEY IS PRESENT (not null)
+#               > the builtin default (the constant this project shipped
+#                 with before this file existed)
+#
+# So: set PK_PERCEPTION_PROVIDER / PK_OLLAMA_MODEL / OLLAMA_BASE_URL /
+# PK_PERCEPTION_CACHE in your environment and it still wins over whatever
+# is written here — this file changes the *default* you fall back to when
+# you haven't set an env var, it never fights one you did set.
+#
+# WHAT IS ACTUALLY WIRED RIGHT NOW (read engine/config.py's module
+# docstring for the full, honest account):
+#   sentinel.*                    -- fully wired (engine.config.build_sentinel())
+#   perception.cache_enabled      -- fully wired (engine/perception/cache.py)
+#   perception.provider/ollama_*  -- resolved + reported via GET /config,
+#                                     but NOT yet rewired into the live
+#                                     WorldRunner's provider selection
+#                                     (that call site is engine/perception/
+#                                     providers/** + engine/integration/**,
+#                                     both out of scope for this packet).
+#                                     Use the env vars today for that.
+#   auditor.*                     -- NOT wired. Honest placeholders only,
+#                                     until the Auditor packet (Day 7,
+#                                     master doc §7.3).
+#   judgment                      -- has no tunables, ever. See below.
+
+perception:
+  # heuristic | ollama | anthropic — see engine/perception/providers/
+  provider: heuristic
+  # Only read when provider: ollama. Mirrors PK_OLLAMA_MODEL's default.
+  ollama_model: qwen2.5:7b
+  # Only read when provider: ollama. Mirrors OLLAMA_BASE_URL's default.
+  ollama_base_url: http://localhost:11434
+  # Perception result cache (.cache/perception/, keyed by message/invoice/
+  # cart id). Mirrors PK_PERCEPTION_CACHE's default ("1"/true).
+  cache_enabled: true
+
+sentinel:
+  # Retries before an action lands in the dead-letter queue. Default
+  # matches engine/action/sentinel.py's MAX_RETRIES.
+  max_retries: 3
+  # Backoff, in minutes, before retry 1 / 2 / 3 respectively. Default
+  # matches BACKOFF_MINUTES. Must be a non-empty list of positive integers;
+  # if you change max_retries, this list is read by index (clamped to its
+  # length), so it doesn't have to be exactly max_retries long.
+  backoff_minutes: [1, 5, 15]
+  # A link (payment link / mandate link) sent but never opened within this
+  # many hours is treated as a soft refusal, never assumed delivered.
+  # Default matches LINK_OPEN_TIMEOUT_HOURS.
+  link_open_timeout_hours: 48
+  # Consecutive send failures (across the whole Sentinel) before the
+  # circuit breaker pauses outbound actions. Default matches
+  # CIRCUIT_BREAKER_THRESHOLD.
+  circuit_breaker_threshold: 5
+
+auditor:
+  # NOT WIRED until the Auditor packet (Day 7, master doc §7.3: samples
+  # 10% of extractions, verifies against the original message, tracks
+  # rolling accuracy, quarantines the extractor below quarantine_threshold).
+  # These two values are placeholders that match the master doc's own
+  # numbers — changing them today has no runtime effect anywhere.
+  sample_rate: 0.10
+  quarantine_threshold: 0.85
+
+judgment: {}
+  # NO TUNABLES HERE. NONE. EVER.
+  #
+  # CLAUDE.md law 4: "All bounds live as constants at the top of
+  # state_machine.py" — MAX_TOUCHES_PER_WEEK, TOUCH_WINDOW_DAYS,
+  # RENEGOTIATION_CAP, MANDATE_AMOUNT_CAP, RETRY_ON_EXECUTION_FAILURE,
+  # MAX_ESCALATE_STAGE, HARD_STEP_CAP, plus the policy bounds (dispute =
+  # instant stop, no mandate re-offer after refusal, legal-stage notices
+  # go to a human). Those are hard code, on purpose, so an LLM (or a config
+  # file, or a well-meaning "just this once") can never talk its way around
+  # a safety rail. GET /config echoes the current values of those
+  # constants for reference/display ONLY — this section is not where they
+  # live and never will be.
+  #
+  # engine/config.py enforces this architecturally, not just by convention:
+  # if you add a key under this section, the config loader refuses to
+  # start rather than silently accepting (and ignoring, or worse, someday
+  # wiring) a bound override.

@@ -18,6 +18,18 @@ default, which is the point: arms B/C reuse Arm A's perception for free.
 Environment:
   PK_PERCEPTION_CACHE=0        disable entirely (tests, forced re-runs)
   PK_PERCEPTION_CACHE_DIR=...  relocate the cache root
+
+TUNABLE (packet P6, config/agents.yaml `perception.cache_enabled`)
+--------------------------------------------------------------------------
+`enabled()` below checks `PK_PERCEPTION_CACHE` first (unchanged — every
+existing test that sets it keeps working exactly as before); only when
+that env var is NOT explicitly set does it fall back to
+`config/agents.yaml`'s `perception.cache_enabled` (via `engine.config`,
+imported lazily inside the function to avoid a circular import —
+`engine.config` itself imports `engine.perception.providers`, which
+imports this module). The shipped yaml sets `cache_enabled: true`, which
+is what this function always returned before that file existed, so an
+untouched checkout is byte-identical.
 """
 
 import hashlib
@@ -53,7 +65,18 @@ def stats() -> dict[str, int]:
 
 
 def enabled() -> bool:
-    return os.environ.get("PK_PERCEPTION_CACHE", "1").strip().lower() not in {"0", "false", "no", "off"}
+    raw = os.environ.get("PK_PERCEPTION_CACHE")
+    if raw is not None and raw.strip():
+        return raw.strip().lower() not in {"0", "false", "no", "off"}
+    try:
+        from engine.config import load_config  # lazy: see module docstring
+
+        yaml_value = load_config().perception.cache_enabled
+        if yaml_value is not None:
+            return yaml_value
+    except Exception:
+        pass  # the config surface must never be able to break perception
+    return True
 
 
 def cache_dir() -> Path:

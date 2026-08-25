@@ -19,7 +19,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from engine import config as agent_config
 from engine.integration.runner import WorldRunner
+from engine.perception import cache as perception_cache
+from engine.perception.providers.ollama import get_fallback_events
 
 MAX_ADVANCE_DAYS = 365
 
@@ -129,3 +132,81 @@ def get_trust(debtor_id: str) -> dict:
     if trust is None:
         raise HTTPException(status_code=404, detail="no trust record yet")
     return json.loads(trust.model_dump_json())
+
+
+def _runtime_model_name() -> str | None:
+    """The model actually driving THIS process's perception provider, if
+    the provider has one. `OllamaProvider` stores it on the instance;
+    `AnthropicProvider` uses `engine.perception.client.MODEL` (a module
+    constant, not an attribute) instead; `heuristic`/`oracle` have none."""
+    provider = runner.provider
+    model = getattr(provider, "model", None)
+    if model is not None:
+        return model
+    if provider.name == "anthropic":
+        from engine.perception.client import MODEL
+
+        return MODEL
+    return None
+
+
+@app.get("/config")
+def get_config() -> dict:
+    """Packet P6: the tunable-parameters surface for the five mesh agents
+    (master doc §7), shown live in System Health. Read-only — this app
+    never accepts a config write over HTTP; `config/agents.yaml` is a file
+    you edit, and `engine.config.load_config()` is memoised per path, so a
+    running process needs a restart to pick up an edit.
+
+    `effective` is the precedence-resolved value (explicit arg > env, if
+    set > yaml, if present > builtin default — see `engine/config.py`) for
+    every `perception.*`/`sentinel.*` field. `live_status` is what THIS
+    process's already-constructed `WorldRunner` actually picked. For
+    `sentinel.*` and `perception.cache_enabled` those two agree by
+    construction (both are genuinely wired). For `perception.provider` /
+    `ollama_model` / `ollama_base_url`, `live_status` may NOT reflect
+    `effective` if the yaml has been edited without also setting the
+    matching env var — this packet resolves and reports that precedence
+    but does not (yet) rewire the live `WorldRunner`'s provider selection;
+    see `engine/config.py`'s module docstring for exactly why.
+    """
+    cfg = agent_config.load_config()
+    provider_val, provider_src = agent_config.effective_perception_provider(cfg)
+    model_val, model_src = agent_config.effective_ollama_model(cfg)
+    base_url_val, base_url_src = agent_config.effective_ollama_base_url(cfg)
+    cache_val, cache_src = agent_config.effective_cache_enabled(cfg)
+
+    return {
+        "config": json.loads(cfg.model_dump_json()),
+        "effective": {
+            "perception": {
+                "provider": {"value": provider_val, "source": provider_src},
+                "ollama_model": {"value": model_val, "source": model_src},
+                "ollama_base_url": {"value": base_url_val, "source": base_url_src},
+                "cache_enabled": {"value": cache_val, "source": cache_src},
+            },
+            "sentinel": agent_config.sentinel_kwargs(cfg),
+        },
+        "bounds": agent_config.bounds_snapshot(),
+        "wiring_notes": {
+            "sentinel": "wired -- engine.config.build_sentinel() constructs a real Sentinel from these values",
+            "perception_cache_enabled": (
+                "wired -- engine/perception/cache.py's enabled() consults this yaml when "
+                "PK_PERCEPTION_CACHE is unset"
+            ),
+            "perception_provider_model_base_url": (
+                "resolved + reported here only -- the live WorldRunner in this process still "
+                "selects its provider via env-var-or-default (see this route's own docstring)"
+            ),
+            "auditor": "not wired until the Auditor packet (Day 7, master doc §7.3) -- placeholders only",
+            "judgment": "no tunables by design (CLAUDE.md law 4) -- bounds are hard constants in "
+                        "state_machine.py, shown above for reference only",
+        },
+        "live_status": {
+            "runtime_provider": runner.provider_name,
+            "runtime_model": _runtime_model_name(),
+            "ollama_fallback_events": len(get_fallback_events()),
+            "sentinel_dead_letter_count": len(runner.sentinel.dead_letter),
+            "cache_stats": perception_cache.stats(),
+        },
+    }
