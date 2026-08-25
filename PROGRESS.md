@@ -65,6 +65,9 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 - **Day 8**: three-arm runner (silence / generic reminder / full system, same seed) → metrics.json, DSO/₹recovered/touches-per-recovery (Tier-0 = 0 row)/false-escalation/cost-per-₹, reproducibility-locked
 - **Day 9**: video (master doc Part 5 script) + README · **Day 10**: cleanup + submit
 
+## ⏸ PARKED (user decision 2026-08-26 — do not chase, resume only on user signal)
+- **Mandate flow-real enablement**: this test account lacks UPI/eMandate (account-level gate, needs business KYC the user rightly won't fabricate, or an organizer-provisioned hackathon account). Everything documented (BUILD_LOG + TRACK_BAR §0 API-real vs flow-real); harness armed (); demo + submission fully intact without it. Optional upgrade path: ask buildathon organizers for an enabled test account.
+
 ## ⚠ OPEN RISKS
 - Local-model nondeterminism: 7b flips one message across runs (88.6% quoted as the floor, gate cleared in all observed runs) — mitigation: quote the range, cache pins demo behavior
 - Mandate execute/revoke realness — one manual registration authorization during demo prep (path documented in the client docstring)
