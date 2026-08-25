@@ -10,3 +10,5 @@ dashboard/.vite/
 .DS_Store
 metrics/*.json
 !metrics/.gitkeep
+rzp.csv
+*.secret
