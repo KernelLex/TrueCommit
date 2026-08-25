@@ -70,6 +70,13 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 - Mandate execute/revoke realness — one manual registration authorization during demo prep (path documented in the client docstring)
 - qwen2.5:3b remains below gate (70.5%) — 7b is the demo model; 3b stays as the honest comparison row
 
+## 🎬 UI DEMO RUN (2026-08-26, live browser session against the fully-merged build)
+Dashboard served at `localhost:5173` (Vite, proxying `/api` → uvicorn on 8010 — `PK_API_PORT` env added to vite.config.js because Windows svchost squats 8000 on this machine), API started with `PK_REAL_RAZORPAY=1`. Verified live in the browser:
+- Funnel at day 3 after one `advance(3)`: ₹1,04,149 recovered, 9 disputed with evidence packets, Tier-2 badge visible; Advance-Day buttons move money/promises/trust on screen — **BUILD.md Day 7's "visibly moves on screen" criterion now demonstrated in the real UI**
+- Entity Timeline shows two REAL Razorpay objects created during the session: payment link `rzp.io/rzp/O0fRy0zV` (INV-006, ₹1,85,000) and UPI mandate registration `rzp.io/rzp/Gz5jTAP4` (INV-011, ₹97,000) — both clickable, both live sandbox pages
+- Trust curves, review queue (9 evidence packets), and System Health (live provider/cache/dead-letter + agents.yaml parameters card) all rendering from the API only
+Run it yourself: `PK_REAL_RAZORPAY=1 ./.venv/Scripts/python.exe -m uvicorn api.main:app --port 8010` + `cd dashboard && PK_API_PORT=8010 npm run dev` → open localhost:5173.
+
 ## 🎬 SANDBOX DEMO RUN (2026-08-26, from a clean worktree at commit 85ee9d0 — reproducible by anyone)
 All eight beats executed live against the merged code; every number below was produced during the run, not quoted from memory:
 1. **Test suite**: 169/169 passed
