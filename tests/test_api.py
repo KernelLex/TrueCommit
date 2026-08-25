@@ -36,3 +36,32 @@ def test_unknown_entity_is_404():
     with TestClient(app) as c:
         assert c.get("/entities/NOPE").status_code == 404
         assert c.get("/trust/NOPE").status_code == 404
+
+
+def test_list_entities_returns_every_loaded_invoice():
+    with TestClient(app) as c:
+        r = c.get("/entities")
+        assert r.status_code == 200
+        rows = r.json()
+        assert len(rows) == 60
+        ids = {row["entity_id"] for row in rows}
+        assert "INV-001" in ids
+        # shape matches the single-entity endpoint (EntityState.model_dump_json)
+        row = next(row for row in rows if row["entity_id"] == "INV-001")
+        assert "state" in row and "invoice_amount_inr" in row
+
+
+def test_list_trust_matches_single_debtor_reads():
+    with TestClient(app) as c:
+        # INV-006 -> D-02, untouched by the earlier tests in this module (they
+        # only exercise INV-001 / D-01), so this is a clean promise_kept path.
+        c.post("/events", json={"type": "invoice_triaged", "entity_id": "INV-006", "payload": {}})
+        c.post("/events", json={"type": "extraction_received", "entity_id": "INV-006", "payload": {"amount_inr": 185000}})
+        c.post("/events", json={"type": "promise_kept", "entity_id": "INV-006", "payload": {}})
+
+        rows = c.get("/trust").json()
+        assert isinstance(rows, list) and len(rows) >= 1
+        row = next(r for r in rows if r["debtor_id"] == "D-02")
+        assert row == c.get("/trust/D-02").json()
+        assert row["alpha"] == 3.0  # prior 2.0 + 1 kept promise
+        assert row["beta"] == 2.0

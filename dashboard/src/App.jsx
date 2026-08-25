@@ -1,121 +1,90 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
+import { useCallback, useRef, useState } from 'react'
 import './App.css'
+import { api } from './api'
+import ToastStack from './components/Toast'
+import FunnelScreen from './screens/FunnelScreen'
+import EntityTimelineScreen from './screens/EntityTimelineScreen'
+import TrustCurvesScreen from './screens/TrustCurvesScreen'
+import HumanReviewScreen from './screens/HumanReviewScreen'
+import SystemHealthScreen from './screens/SystemHealthScreen'
+
+const TABS = [
+  { key: 'funnel', label: 'Funnel', component: FunnelScreen },
+  { key: 'timeline', label: 'Entity Timeline', component: EntityTimelineScreen },
+  { key: 'trust', label: 'Trust Curves', component: TrustCurvesScreen },
+  { key: 'review', label: 'Human Review', component: HumanReviewScreen },
+  { key: 'health', label: 'System Health', component: SystemHealthScreen },
+]
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [tab, setTab] = useState('funnel')
+  const [toasts, setToasts] = useState([])
+  const [advancing, setAdvancing] = useState(false)
+  const toastSeq = useRef(0)
+
+  const pushToast = useCallback((text, kind = 'info') => {
+    const id = ++toastSeq.current
+    setToasts((prev) => [...prev, { id, text, kind }])
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id))
+    }, 4200)
+  }, [])
+
+  const handleAdvance = useCallback(
+    async (days) => {
+      setAdvancing(true)
+      try {
+        await api.advance(days)
+        pushToast(`Advanced ${days} day${days === 1 ? '' : 's'}.`, 'success')
+      } catch (e) {
+        // /advance doesn't exist yet — a later packet adds the integration
+        // runner. Never let this crash the dashboard.
+        if (e.status === 404 || e.status === 0 || !e.status) {
+          pushToast('Time-warp integration runner coming online — /advance is not wired yet.', 'info')
+        } else {
+          pushToast(`Advance failed: ${e.message}`, 'error')
+        }
+      } finally {
+        setAdvancing(false)
+      }
+    },
+    [pushToast],
+  )
+
+  const ActiveScreen = TABS.find((t) => t.key === tab)?.component || FunnelScreen
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
+    <div className="app-shell">
+      <header className="app-header">
+        <div className="app-brand">
+          <span className="app-title">Promise Keeper</span>
+          <span className="app-subtitle">Judge Dashboard</span>
         </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
+        <div className="time-warp">
+          <button type="button" className="btn btn-timewarp" disabled={advancing} onClick={() => handleAdvance(1)}>
+            Advance 1 Day ▶
+          </button>
+          <button type="button" className="btn btn-timewarp btn-timewarp-fast" disabled={advancing} onClick={() => handleAdvance(45)}>
+            Run to Day 45 ⏩
+          </button>
         </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+      </header>
 
-      <div className="ticks"></div>
+      <div className="app-body">
+        <nav className="app-sidebar">
+          {TABS.map((t) => (
+            <button key={t.key} type="button" className={`sidebar-tab ${tab === t.key ? 'sidebar-tab-active' : ''}`} onClick={() => setTab(t.key)}>
+              {t.label}
+            </button>
+          ))}
+        </nav>
+        <main className="app-main">
+          <ActiveScreen />
+        </main>
+      </div>
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+      <ToastStack toasts={toasts} />
+    </div>
   )
 }
 

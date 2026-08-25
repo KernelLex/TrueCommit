@@ -57,6 +57,14 @@ def post_event(event: EventIn) -> dict | None:
     return json.loads(action.model_dump_json()) if action else None
 
 
+@app.get("/entities")
+def list_entities() -> list[dict]:
+    """Read-only listing of every EntityState the ledger knows about — feeds
+    the dashboard's funnel (state -> at-risk/in-recovery/recovered bucket)
+    and the entity-timeline picker (P4)."""
+    return [json.loads(e.model_dump_json()) for e in ledger.entities.values()]
+
+
 @app.get("/entities/{entity_id}")
 def get_entity(entity_id: str) -> dict:
     entity = ledger.entities.get(entity_id)
@@ -73,6 +81,15 @@ def get_entity_audit(entity_id: str) -> list[dict]:
 @app.get("/audit")
 def get_audit(limit: int = 100) -> list[dict]:
     return [json.loads(a.model_dump_json()) for a in ledger.audit[-limit:]]
+
+
+@app.get("/trust")
+def list_trust() -> list[dict]:
+    """Read-only listing of every TrustState — feeds the dashboard's trust
+    curves screen (P4). No decay is applied here (that only happens on the
+    ordinary event-driven read paths); this is a snapshot of last-updated
+    posteriors."""
+    return [json.loads(t.model_dump_json()) for t in ledger.trust.values()]
 
 
 @app.get("/trust/{debtor_id}")
