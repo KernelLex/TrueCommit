@@ -6,6 +6,12 @@ Status legend: ⬜ not started · 🟡 partial · ✅ done + proof link into the
 
 ---
 
+## 0. Razorpay sandbox capability baseline (drives the real-vs-simulated table) — ✅ verified 2026-08-26
+Live probes with TEST keys (`scripts/verify_razorpay_sandbox.py` → `tracking/razorpay_sandbox_report.json`, 8/8 green):
+- **REAL in test mode:** auth · Payment Links (real `short_url`) · Invoices · Customers · plain Orders · **mandate registration links for BOTH UPI Autopay and eMandate** (real registration `short_url`s issued — the crown-jewel rail is live in sandbox)
+- **Needs one manual browser step or simulated+labeled:** mandate *execute* (recurring charge against an authorized token) and *revoke* (token delete) — both require a registration a human has authorized in the test checkout first. Plan: authorize one registration manually during demo prep so at least one execute is real; everything else simulated with explicit labels per BUILD.md Day 6.
+- **Gotcha for Day-6 wiring:** `POST /orders` silently drops a `token:{}` block — use the `subscription_registration/auth_links` flow, not hand-rolled token orders.
+
 ## 1. Measured money recovered across a batch — ⬜ not started
 - 3-arm run outputs (Arm A silence / Arm B generic reminder / Arm C full system): not run yet
 - `metrics.json`: does not exist yet
