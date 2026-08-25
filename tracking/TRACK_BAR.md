@@ -26,8 +26,9 @@ Status legend: ⬜ not started · 🟡 partial · ✅ done + proof link into the
 
 ## 4. Audit trail — 🟡 partial
 - Append-only event log implementation: ✅ `Ledger.audit: list[AuditEntry]` in `engine/judgment/ledger.py` — every state transition and every action (allowed or blocked) writes an `AuditEntry` before the action is returned to the caller (`tests/test_ledger.py::test_audit_entry_exists_before_action_is_returned`); not yet persisted to disk/DB, lives in-memory per `Ledger` instance
+- Queryable via API: ✅ `GET /entities/{id}/audit` and `GET /audit` in `api/main.py`, backed by the same in-memory `Ledger`, dataset (60 invoices) loaded at startup
 - Dashboard timeline screen (entity timeline, master doc §4.3): ⬜ not built (Day 7 scope)
-- Proof link: `engine/judgment/ledger.py`, `tests/test_ledger.py`
+- Proof link: `engine/judgment/ledger.py`, `api/main.py`, `tests/test_ledger.py`, `tests/test_api.py`
 
 ---
 

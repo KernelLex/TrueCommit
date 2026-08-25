@@ -70,9 +70,9 @@ Build:
 - `sim/personas.py`: 6 personas with scripted response tables
   (probabilities from v2 doc §3.2), seeded RNG
 Accept when:
-- [ ] `python -m sim.run --days 45 --seed 42` replays identically twice (diff = empty)
-- [ ] ground_truth covers 100% of messages/invoices/carts
-- [ ] a second person (or your coding AI in "judge mode") reads 10 random
+- [x] `python -m sim.run --days 45 --seed 42` replays identically twice (diff = empty)
+- [x] ground_truth covers 100% of messages/invoices/carts
+- [x] a second person (or your coding AI in "judge mode") reads 10 random
       conversations and agrees the labels are fair
 
 ### DAY 3 — Root-cause Triage (perception/triage.py)
@@ -102,9 +102,9 @@ failure-recovery story, not a shame.
   §3.4 as constants at top of file + `check_bounds()` gate before every action
 - Reserve pre-check: payment_failed event → `if customer.reserve_active: tier0_recover()`
 Accept when:
-- [ ] pytest: every bound has a test that tries to violate it and fails
-- [ ] pytest: dispute event from ANY state → DISPUTED, no further outbound actions
-- [ ] pytest: no path loops (walk 1000 random event sequences → all terminate
+- [x] pytest: every bound has a test that tries to violate it and fails
+- [x] pytest: dispute event from ANY state → DISPUTED, no further outbound actions
+- [x] pytest: no path loops (walk 1000 random event sequences → all terminate
       in KEPT / CLEAN_LOSS / HUMAN_HANDOFF)
 
 ### DAY 6 — Action Layer + Razorpay wiring

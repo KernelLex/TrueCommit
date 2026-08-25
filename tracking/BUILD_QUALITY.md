@@ -5,7 +5,8 @@ Kept truthful. Update whenever a check is actually re-run — don't carry forwar
 ---
 
 ## Cold start
-- Runs in 2 commands on a stranger's machine: ⬜ not yet possible (backend/dashboard not wired) — last verified: never
+- Backend API: ✅ `uvicorn api.main:app` starts clean and serves real data — verified 2026-08-26 (`curl /health` → `{"status":"ok","invoices_loaded":60,"reserves_active":2}`)
+- Full 2-command cold start (backend + dashboard together): ⬜ not yet possible — dashboard has no features built yet (Day 7 scope)
 - Target commands (per README §, to be finalized Day 9): TBD, likely `make run` or equivalent two-step
 
 ## Tests
@@ -34,7 +35,7 @@ Kept truthful. Update whenever a check is actually re-run — don't carry forwar
 | 5 | dispute from any state → DISPUTED, no further outbound actions | ✅ parametrized over all 11 non-terminal states |
 | 5 | 1000 random event sequences all terminate in KEPT/CLEAN_LOSS/HUMAN_HANDOFF | ✅ (DISPUTED included in the terminal set — see state_machine.py docstring) |
 | 6 | real test-mode Payment Link URL in audit trail | ⬜ blocked on Razorpay TEST keys |
-| 6 | network-kill mid-run → dead-letter, resume works | ⬜ |
+| 6 | network-kill mid-run → dead-letter, resume works | 🟡 retry/backoff/dead-letter logic built + tested in isolation (`engine/action/sentinel.py`, `tests/test_action_layer.py`); not yet exercised against a real network call since there isn't one yet (blocked on Razorpay keys) |
 | 7 | cold start → dashboard funnel with real data in <60s | ⬜ |
 | 7 | Advance-Day visibly moves money/promises/trust on screen | ⬜ |
 | 7 | `v1.0-freeze` tag | ⬜ |
@@ -48,4 +49,5 @@ Kept truthful. Update whenever a check is actually re-run — don't carry forwar
 - 2026-08-26: `engine/schemas.py` — all 10 BUILD.md §2 contracts + InvoiceCause, smoke-tested.
 - 2026-08-26: dataset (60 invoices/12 debtors, 12 carts, 24 threads/93 messages, ground_truth.json) generated via `data/generate.py`, fully schema-validated, 100% ground-truth coverage, deterministic. `sim/clock.py` + `sim/personas.py` + `sim/run.py` written; `python -m sim.run --days 45 --seed 42` produces a 408-event deterministic, schema-valid log. Tagged `personas-frozen`.
 - 2026-08-26: judgment layer (`engine/judgment/{trust,state_machine,ledger}.py`) — zero LLM, all 8 hard bounds from master doc §3.4 enforced via `check_bounds()`, dispute-from-any-state and 1000-random-sequence termination guarantees verified. 48/48 tests passing.
-- 2026-08-26: non-LLM/non-Razorpay Day-6 action-layer slice (`engine/action/{messenger,sentinel,evidence}.py` + `razorpay_client.py` interface stubs) — 15 tests. Perception layer (`engine/perception/{client,triage,extractor,cart_cause}.py` + 5 prompt files + `eval/{triage_eval,extraction_eval}.py`) — fully built, imports cleanly, fails cleanly without a key, 10 tests. Found and fixed a real spec/environment mismatch: `claude-sonnet-4-6` + "temp 0" are both stale against the installed SDK (temperature removed entirely; structured outputs via `output_format=` is the current mechanism) — logged in DECISIONS.md, CLAUDE.md corrected. 73/73 tests passing overall.
+- 2026-08-26: non-LLM/non-Razorpay Day-6 action-layer slice (`engine/action/{messenger,sentinel,evidence}.py` + `razorpay_client.py` interface stubs) — 15 tests. Perception layer (`engine/perception/{client,triage,extractor,cart_cause}.py` + 5 prompt files + `eval/{triage_eval,extraction_eval}.py`) — fully built, imports cleanly, fails cleanly without a key, 10 tests. Found and fixed a real spec/environment mismatch: `claude-sonnet-4-6` + "temp 0" are both stale against the installed SDK (temperature removed entirely; structured outputs via `output_format=` is the current mechanism) — logged in DECISIONS.md, CLAUDE.md corrected.
+- 2026-08-26: `api/main.py` — FastAPI skeleton wired to the real judgment layer, dataset loaded at startup (60 invoices, 2 active reserves). Verified both via `TestClient` and a real `uvicorn api.main:app` process (`curl /health` succeeds). **Phase A complete** — everything BUILD.md schedules for Day 0-2 + Day 5 + the non-LLM/non-Razorpay slice of Day 6, all with real passing tests, no faked results. 76/76 tests passing overall. Next: Phase B (triage/extractor live calls, needs `ANTHROPIC_API_KEY`) and Phase C (Razorpay OTM sandbox verification, needs Razorpay TEST keys) — both still blocked on the user providing keys.
