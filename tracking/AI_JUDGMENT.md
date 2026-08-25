@@ -25,12 +25,12 @@ One model everywhere: **Claude Sonnet (`claude-sonnet-4-6`) via the Anthropic AP
 
 Per master doc §2.2 — say this list out loud in the video:
 
-1. **Escalation stage transitions** — deterministic state machine (`engine/judgment/state_machine.py`)
-2. **Trust score** — Beta(α,β) posterior math, closed-form, auditable (`engine/judgment/trust.py`)
-3. **Mandate creation/amounts** — copied exactly from ledger records, never LLM-generated
-4. **Bounds enforcement** (caps, cooldowns, stop rules) — hard-coded constants, cannot be prompted around
-5. **Money movement** — Razorpay APIs only, triggered by state machine only
-6. **Metrics computation** — plain Python, reproducible (`eval/run_arms.py`)
+1. **Escalation stage transitions** — deterministic state machine (`engine/judgment/state_machine.py`) — ✅ built + tested 2026-08-26 (48 passing tests)
+2. **Trust score** — Beta(α,β) posterior math, closed-form, auditable (`engine/judgment/trust.py`) — ✅ built + tested 2026-08-26
+3. **Mandate creation/amounts** — copied exactly from ledger records, never LLM-generated — ✅ enforced in `state_machine.check_bounds()` + `ledger.py` (proof: `tests/test_ledger.py::test_mandate_amount_always_equals_ledger_invoice_amount_never_llm_number` — feeds a wrong "extracted" amount and confirms the resulting mandate action still uses the ledger's number)
+4. **Bounds enforcement** (caps, cooldowns, stop rules) — hard-coded constants, cannot be prompted around — ✅ built + tested 2026-08-26, all 8 bounds from master doc §3.4
+5. **Money movement** — Razorpay APIs only, triggered by state machine only — ⬜ `engine/action/razorpay_client.py` not yet built (Phase C, needs Razorpay TEST keys)
+6. **Metrics computation** — plain Python, reproducible (`eval/run_arms.py`) — ⬜ not yet built (Phase E)
 
 **The design law: the LLM can SEE and SPEAK, never SPEND.** Worst-case LLM hallucination = an awkward message, never a wrong debit. That's the blast-radius answer if asked.
 

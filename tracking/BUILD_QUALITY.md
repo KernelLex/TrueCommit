@@ -9,8 +9,8 @@ Kept truthful. Update whenever a check is actually re-run — don't carry forwar
 - Target commands (per README §, to be finalized Day 9): TBD, likely `make run` or equivalent two-step
 
 ## Tests
-- Test count passing: 0 / 0 (no tests written yet — Phase A will add `tests/test_state_machine.py` and dataset/simulator determinism checks)
-- Last full `pytest` run: not yet run
+- Test count passing: 48 / 48 (`tests/test_state_machine.py` 35, `tests/test_ledger.py` 6, `tests/test_trust.py` 7)
+- Last full `pytest` run: 2026-08-26, all green, 0.51s
 
 ## Secrets hygiene
 - Grep check for `rzp_` / `sk-ant` in tracked files: not yet run (no code committed yet)
@@ -30,9 +30,9 @@ Kept truthful. Update whenever a check is actually re-run — don't carry forwar
 | 1–2 | judge-mode read of 10 random conversations agrees labels are fair | ✅ done 2026-08-26 (self, "judge mode" per BUILD.md) — read T-05/T-06/T-16/T-18/T-22 critically, caught and fixed one real mislabel (M-06-4) and a timestamp/narrative inconsistency; logged in BUILD_LOG.md and DECISIONS.md |
 | 3 | triage accuracy ≥90% | ⬜ blocked on ANTHROPIC_API_KEY |
 | 4 | extraction level accuracy ≥85% | ⬜ blocked on ANTHROPIC_API_KEY |
-| 5 | every bound has a violation test that fails correctly | ⬜ |
-| 5 | dispute from any state → DISPUTED, no further outbound actions | ⬜ |
-| 5 | 1000 random event sequences all terminate in KEPT/CLEAN_LOSS/HUMAN_HANDOFF | ⬜ |
+| 5 | every bound has a violation test that fails correctly | ✅ 8/8 bounds, `tests/test_state_machine.py` |
+| 5 | dispute from any state → DISPUTED, no further outbound actions | ✅ parametrized over all 11 non-terminal states |
+| 5 | 1000 random event sequences all terminate in KEPT/CLEAN_LOSS/HUMAN_HANDOFF | ✅ (DISPUTED included in the terminal set — see state_machine.py docstring) |
 | 6 | real test-mode Payment Link URL in audit trail | ⬜ blocked on Razorpay TEST keys |
 | 6 | network-kill mid-run → dead-letter, resume works | ⬜ |
 | 7 | cold start → dashboard funnel with real data in <60s | ⬜ |
@@ -46,4 +46,5 @@ Kept truthful. Update whenever a check is actually re-run — don't carry forwar
 ## Phase A progress log
 - 2026-08-26: repo skeleton, git init, `.gitignore`, `.env.example`, spec docs (`CLAUDE.md`, `BUILD.md`, master doc) committed to repo root. venv + Python deps installing. Dashboard scaffolded via `npm create vite`.
 - 2026-08-26: `engine/schemas.py` — all 10 BUILD.md §2 contracts + InvoiceCause, smoke-tested.
-- 2026-08-26: dataset (60 invoices/12 debtors, 12 carts, 24 threads/93 messages, ground_truth.json) generated via `data/generate.py`, fully schema-validated, 100% ground-truth coverage, deterministic. `sim/clock.py` + `sim/personas.py` + `sim/run.py` written; `python -m sim.run --days 45 --seed 42` produces a 408-event deterministic, schema-valid log.
+- 2026-08-26: dataset (60 invoices/12 debtors, 12 carts, 24 threads/93 messages, ground_truth.json) generated via `data/generate.py`, fully schema-validated, 100% ground-truth coverage, deterministic. `sim/clock.py` + `sim/personas.py` + `sim/run.py` written; `python -m sim.run --days 45 --seed 42` produces a 408-event deterministic, schema-valid log. Tagged `personas-frozen`.
+- 2026-08-26: judgment layer (`engine/judgment/{trust,state_machine,ledger}.py`) — zero LLM, all 8 hard bounds from master doc §3.4 enforced via `check_bounds()`, dispute-from-any-state and 1000-random-sequence termination guarantees verified. 48/48 tests passing.
