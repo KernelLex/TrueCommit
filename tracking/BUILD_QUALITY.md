@@ -10,8 +10,8 @@ Kept truthful. Update whenever a check is actually re-run — don't carry forwar
 - Target commands (per README §, to be finalized Day 9): TBD, likely `make run` or equivalent two-step
 
 ## Tests
-- Test count passing: 169 / 169 (`test_providers.py` 78, `test_state_machine.py` 35, `test_razorpay_client.py` 14, `test_perception.py` 13, `test_action_layer.py` 11, `test_trust.py` 7, `test_ledger.py` 6, `test_api.py` 5)
-- Last full `pytest` run: 2026-08-26, all green, ~1.6s
+- Test count passing: 215 / 215 at last full run (169 through batch 1 + 25 `test_ollama_provider.py` [P5, merged] + 21 from P2's in-flight integration work [passing in-tree, merge pending P2's report])
+- Last full `pytest` run: 2026-08-26, all green, ~7.4s
 
 ## Secrets hygiene
 - Grep check for `rzp_` / `sk-ant` in tracked files: ✅ clean — `git grep -nE "rzp_(test|live)_[A-Za-z0-9]|sk-ant-api" -- .`
@@ -29,8 +29,8 @@ Kept truthful. Update whenever a check is actually re-run — don't carry forwar
 | 1–2 | `sim.run --days 45 --seed 42` replays identically twice | ✅ verified 2026-08-26 — byte-identical `diff` across two runs, 408 events, all validate against `engine.schemas.Event` |
 | 1–2 | ground_truth covers 100% of messages/invoices/carts | ✅ verified 2026-08-26 — 60/60 invoices, 12/12 carts, 44/44 inbound messages all have ground-truth entries |
 | 1–2 | judge-mode read of 10 random conversations agrees labels are fair | ✅ done 2026-08-26 (self, "judge mode" per BUILD.md) — read T-05/T-06/T-16/T-18/T-22 critically, caught and fixed one real mislabel (M-06-4) and a timestamp/narrative inconsistency; logged in BUILD_LOG.md and DECISIONS.md |
-| 3 | triage accuracy ≥90% | 🟡 **measured, FAILS the gate** — `heuristic` provider (offline, free): **71.7%** on n=60, 2026-08-26 (`metrics/triage_accuracy_heuristic.json`). Split: **91.7%** on the 24 invoices that have a conversation thread, 58.3% vs a 61.1% flag-only ceiling on the 36 that don't. Root cause is the dataset, not the classifier — see BUILD_LOG 2026-08-26. LLM providers not yet measured (no key). |
-| 4 | extraction level accuracy ≥85% | 🟡 **measured, PASSES the gate — with a caveat that must be stated** — `heuristic` provider (offline, free): **97.7%** on n=44, 2026-08-26 (`metrics/extraction_accuracy_heuristic.json`). Rules were authored with the labels visible (no held-out split), so this is an IN-SAMPLE upper bound; the metrics file carries `"in_sample": true` and both evals print the caveat. LLM providers not yet measured (no key). |
+| 3 | triage accuracy ≥90% | 🟡 gate scoped to threaded invoices by lead ruling (DECISIONS.md): `heuristic` **91.7% PASS** on the 24 threaded / 71.7% all-60 headline. Ollama measured 2026-08-26: qwen2.5:7b **91.7% threaded** / 53.3% overall; 3b 87.5% / 56.7% — no-thread cases sit under the proven 61.1% info ceiling for every provider. |
+| 4 | extraction level accuracy ≥85% | 🟡 three-way measured 2026-08-26: `heuristic` **97.7% PASS (in-sample caveat)** · qwen2.5:7b **77.3% FAIL** · qwen2.5:3b **59.1% FAIL** (out-of-sample, `metrics/extraction_accuracy_ollama_{7b,3b}.json`). Measurement exposed a real assembly bug (no reference date in prompts — see BUILD_LOG); prompt-iteration packet dispatched per BUILD.md Day 4's own loop before any fallback decision. |
 | 5 | every bound has a violation test that fails correctly | ✅ 8/8 bounds, `tests/test_state_machine.py` |
 | 5 | dispute from any state → DISPUTED, no further outbound actions | ✅ parametrized over all 11 non-terminal states |
 | 5 | 1000 random event sequences all terminate in KEPT/CLEAN_LOSS/HUMAN_HANDOFF | ✅ (DISPUTED included in the terminal set — see state_machine.py docstring) |
