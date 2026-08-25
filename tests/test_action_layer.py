@@ -1,11 +1,8 @@
 import datetime as dt
 
-import pytest
-
 from engine.action.evidence import build_evidence_packet, render_card
 from engine.action.messenger import Messenger
 from engine.action.sentinel import MAX_RETRIES, Sentinel
-from engine.action import razorpay_client
 from engine.schemas import Action, Invoice, Message
 
 NOW = dt.datetime(2026, 8, 26, 12, 0, 0)
@@ -124,16 +121,4 @@ def test_evidence_packet_excerpt_capped_and_card_renders():
     assert "DISPUTE" in card and "INV-001" in card
 
 
-# -- razorpay_client (interface-only until Phase C) --------------------
-
-
-@pytest.mark.parametrize("fn,args", [
-    (razorpay_client.create_payment_link, (1000, "x", {})),
-    (razorpay_client.create_invoice, (1000, "x", {}, "2026-09-01")),
-    (razorpay_client.create_mandate_order, (1000, "2026-09-01", {}, "scheduled")),
-    (razorpay_client.execute_mandate, ("M-1",)),
-    (razorpay_client.revoke_mandate, ("M-1",)),
-])
-def test_razorpay_client_stubs_raise_until_configured(fn, args):
-    with pytest.raises(NotImplementedError):
-        fn(*args)
+# -- razorpay_client tests now live in tests/test_razorpay_client.py --------
