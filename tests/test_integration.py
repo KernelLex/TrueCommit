@@ -170,31 +170,65 @@ def test_touch_cap_holds_in_the_message_queue(world: WorldRunner):
     assert world.bound_violations() == []
 
 
-def test_touch_cap_is_enforced_per_invoice_not_per_debtor(world: WorldRunner):
-    """KNOWN GAP, asserted so it can never regress silently.
+def test_touch_cap_is_enforced_per_debtor_not_just_per_invoice(world: WorldRunner):
+    """Bound #4 as CLAUDE.md law 4 and master doc §3.4 actually word it: "max 2
+    touches/week per DEBTOR", not per invoice.
 
-    CLAUDE.md law 4 words the bound as "max 2 touches/week per DEBTOR";
-    `state_machine.check_bounds` enforces it against `entity.touches`, and an
-    entity is one INVOICE. A debtor holding several overdue invoices can
-    therefore receive more than two messages a week without any bound firing.
-    Logged in tracking/BUILD_LOG.md (2026-08-26, packet P2) — fixing it is a
-    judgment-layer change, not a runner change. This test pins the current,
-    honest behaviour rather than pretending the stricter claim holds.
+    This test used to assert the opposite. Through packet P2 the cap was
+    enforced against `entity.touches`, and an entity is one INVOICE — so a
+    debtor holding five overdue invoices could collect six messages in a week
+    with every individual action passing the gate. It was pinned in both
+    directions (per-invoice <= 2 AND per-debtor > 2) precisely so that fixing
+    it would break this test and force the claim to be re-stated. Packet P8
+    fixed it (per-debtor window inside `check_bounds`), so the assertion is now
+    the law itself. Recomputed from the message QUEUE, not from the ledger's
+    counter, so it would still catch a gate that leaked.
     """
     per_debtor: dict[str, list[dt.datetime]] = {}
     for message in world.messenger.queue:
         invoice = world.invoices.get(message.entity_id)
         debtor = invoice.debtor_id if invoice else message.entity_id
         per_debtor.setdefault(debtor, []).append(message.ts)
+    assert len(per_debtor) > 1, "a single-debtor run could never exercise the per-debtor scope"
 
-    peak = 0
-    for stamps in per_debtor.values():
+    worst: dict[str, int] = {}
+    for debtor, stamps in per_debtor.items():
         stamps.sort()
-        for i, start in enumerate(stamps):
-            peak = max(peak, sum(1 for t in stamps[i:] if (t - start).days < TOUCH_WINDOW_DAYS))
+        worst[debtor] = max(
+            (sum(1 for t in stamps[i:] if (t - start).days < TOUCH_WINDOW_DAYS)
+             for i, start in enumerate(stamps)),
+            default=0,
+        )
 
-    assert max(world.touch_windows().values()) <= MAX_TOUCHES_PER_WEEK  # per invoice: enforced
-    assert peak > MAX_TOUCHES_PER_WEEK  # per debtor: NOT enforced today — see docstring
+    over = {d: n for d, n in worst.items() if n > MAX_TOUCHES_PER_WEEK}
+    assert over == {}, f"per-debtor touch cap breached: {over}"
+    assert worst == world.debtor_touch_windows()          # the runner's own report agrees
+    assert max(world.touch_windows().values()) <= MAX_TOUCHES_PER_WEEK  # per invoice, implied
+    # ...and at least one debtor really did hit the cap, so the bound was
+    # exercised rather than merely never approached.
+    assert max(worst.values()) == MAX_TOUCHES_PER_WEEK
+
+
+def test_a_debtors_touch_budget_is_shared_across_their_invoices(world: WorldRunner):
+    """The behavioural half of the same law, stated the way the product story
+    states it: we throttle the human, not the invoice. On at least one day a
+    debtor holding several open invoices had a touch to one of them BLOCKED —
+    and the block is in the audit trail, which is what makes it a stopping rule
+    rather than a dropped message."""
+    blocks = [
+        e for e in world.ledger.audit
+        if e.layer == "sentinel" and e.summary.startswith("action blocked")
+        and "max_touches_per_week" in str(e.detail.get("reason", ""))
+    ]
+    assert blocks, "the per-debtor cap never actually blocked anything in this run"
+    assert all("debtor" in str(e.detail.get("reason", "")) for e in blocks)
+
+    blocked_debtors = {e.detail["debtor_id"] for e in blocks}
+    assert len(blocked_debtors) > 1
+    # every blocked entity belongs to a debtor who holds more than one invoice
+    for entry in blocks:
+        siblings = [i for i in world.invoices.values() if i.debtor_id == entry.detail["debtor_id"]]
+        assert len(siblings) > 1
 
 
 def test_mandate_amounts_always_come_from_the_ledger_record(world: WorldRunner):

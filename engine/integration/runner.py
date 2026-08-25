@@ -24,14 +24,18 @@ THE FOUR RULES THIS FILE OBEYS (and how)
    comes back — and which one — is the ledger's call, made behind
    `check_bounds()` with the audit entry already written (CLAUDE.md laws 3+4).
 
-   Consequence worth stating plainly: the ledger's action table
-   (`_ESCALATE_ACTION` + `_decide_action`) produces an Action only for
-   MANDATED / LINKED / AT_RISK / ESCALATE_* / DISPUTED. A plain gentle nudge
-   at the ENGAGED stage yields no Action, so this runner **queues no message
-   for it** — an outbound message that didn't pass the bounds gate would be an
-   untracked touch, which is exactly what bound #4 exists to prevent. The
-   `outreach_sent` event is still emitted and audited; it just carries no
-   instrument yet. See tracking/BUILD_LOG.md (2026-08-26, packet P2).
+   Consequence worth stating plainly: this runner writes no outbound copy that
+   isn't answering an Action the ledger handed back. That includes the plain
+   gentle nudge — the ledger's `_OUTREACH_ACTION` table turns a scheduled
+   outreach beat into a bounds-checked `message` Action (stage gentle/firm by
+   ladder position), and the runner only drafts copy once it has one. When the
+   ledger declines (the debtor already had their two touches this week, or the
+   ladder is at a merchant-review/handoff stage), `_emit` returns None, no
+   message is queued, and the *block* is what lands in the audit trail. A
+   blocked touch is a normal, expected outcome here — with the cap scoped per
+   debtor, five invoices sharing one debtor cannot all be chased on the same
+   day, and the three that aren't are exactly the bound doing its job.
+   See tracking/BUILD_LOG.md (2026-08-26, packets P2 + P8).
 
 2. **Amounts come from ledger records only** (CLAUDE.md law 2). Extractions
    here really do carry amounts the "debtor" stated — they ride in the event
@@ -68,7 +72,7 @@ import datetime as dt
 import os
 import random
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from data.generate import DEBTOR_BY_ID
 from engine.action import razorpay_client
@@ -164,6 +168,7 @@ MANDATE_REFUSE_TEMPLATES = (
 )
 
 ESCALATION_TEXT = {
+    "gentle": "Hi — a quick reminder that Rs.{amount:,} against {entity_id} is past its due date. When can we expect it?",
     "firm": "Firm reminder: Rs.{amount:,} against {entity_id} is still outstanding. Please confirm a payment date.",
     "legal": "[merchant review required] Formal notice draft for {entity_id}, Rs.{amount:,}.",
 }
@@ -347,7 +352,15 @@ class WorldRunner:
             self._outreach(entity_id, stage, day)
 
     def _outreach(self, entity_id: str, stage: str, day: int) -> None:
-        self._emit("outreach_sent", entity_id, {"stage": stage}, day)
+        action = self._emit("outreach_sent", entity_id, {"stage": stage}, day)
+        if action is None:
+            # The ledger declined this touch — almost always the per-debtor
+            # touch cap, occasionally a ladder position that has nothing to say
+            # (ESCALATE_3/4). Either way nothing was sent, so there is nothing
+            # for the debtor to react to: asking the persona for a reply here
+            # would be simulating an answer to a message that never went out.
+            # The block itself is already in the audit trail.
+            return
 
         persona = self._persona(entity_id)
         move = decide_reply_move(self.rng, persona, stage)  # PROPERTIES only (law 7)
@@ -869,19 +882,42 @@ class WorldRunner:
         return [(a.entity_id, a.layer, a.summary) for a in self.ledger.audit]
 
     def touch_windows(self) -> dict[str, int]:
-        """Max messages queued to each entity inside any rolling
-        TOUCH_WINDOW_DAYS window — the message-queue-side proof of bound #4."""
-        by_entity: dict[str, list[dt.datetime]] = {}
+        """Max messages queued to each ENTITY inside any rolling
+        TOUCH_WINDOW_DAYS window. Informational: the law is per debtor, so
+        `debtor_touch_windows()` below is the one bound #4 is judged on."""
+        return self._worst_windows(self._stamps_by(lambda m: m.entity_id))
+
+    def debtor_touch_windows(self) -> dict[str, int]:
+        """Max messages queued to each DEBTOR inside any rolling
+        TOUCH_WINDOW_DAYS window, counting every entity they hold — the
+        message-queue-side proof of bound #4 as CLAUDE.md law 4 words it.
+        Computed from the queue, independently of the ledger's own counter, so
+        it can actually disagree with it if the gate ever leaks."""
+        return self._worst_windows(self._stamps_by(self._debtor_of_message))
+
+    def _debtor_of_message(self, message: Message) -> str:
+        invoice = self.invoices.get(message.entity_id)
+        if invoice is not None:
+            return invoice.debtor_id
+        cart = self.carts.get(message.entity_id)
+        return cart.customer_id if cart is not None else message.entity_id
+
+    def _stamps_by(self, key: Callable[[Message], str]) -> dict[str, list[dt.datetime]]:
+        grouped: dict[str, list[dt.datetime]] = {}
         for message in self.messenger.queue:
-            by_entity.setdefault(message.entity_id, []).append(message.ts)
+            grouped.setdefault(key(message), []).append(message.ts)
+        return grouped
+
+    @staticmethod
+    def _worst_windows(grouped: dict[str, list[dt.datetime]]) -> dict[str, int]:
         worst: dict[str, int] = {}
-        for entity_id, stamps in by_entity.items():
+        for group_id, stamps in grouped.items():
             stamps.sort()
             peak = 0
             for i, start in enumerate(stamps):
                 count = sum(1 for t in stamps[i:] if (t - start).days < TOUCH_WINDOW_DAYS)
                 peak = max(peak, count)
-            worst[entity_id] = peak
+            worst[group_id] = peak
         return worst
 
     def bound_violations(self) -> list[str]:
@@ -889,8 +925,8 @@ class WorldRunner:
         Health screen; cheap enough to call after any advance."""
         problems = [f"{a.id} ({a.kind}) bypassed check_bounds" for a in self.actions if not a.bounds_checked]
         problems += [
-            f"{entity_id} received {peak} messages in a {TOUCH_WINDOW_DAYS}-day window"
-            for entity_id, peak in sorted(self.touch_windows().items())
+            f"debtor {debtor_id} received {peak} messages in a {TOUCH_WINDOW_DAYS}-day window"
+            for debtor_id, peak in sorted(self.debtor_touch_windows().items())
             if peak > MAX_TOUCHES_PER_WEEK
         ]
         return problems

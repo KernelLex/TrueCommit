@@ -36,6 +36,7 @@ def entity(**overrides) -> sm.EntityState:
 
 
 def test_bound_max_touches_per_week():
+    """No debtor window supplied -> the entity is its own debtor."""
     e = entity(state="ESCALATE_1", touches=[NOW - dt.timedelta(days=1), NOW - dt.timedelta(days=3)])
     result = sm.check_bounds(e, "message", {"stage": "firm"}, NOW)
     assert not result.allowed
@@ -46,6 +47,62 @@ def test_bound_max_touches_per_week_resets_outside_window():
     e = entity(state="ESCALATE_1", touches=[NOW - dt.timedelta(days=10), NOW - dt.timedelta(days=9)])
     result = sm.check_bounds(e, "message", {"stage": "firm"}, NOW)
     assert result.allowed  # both touches are outside the 7-day window
+
+
+def test_bound_max_touches_per_week_is_scoped_to_the_DEBTOR_not_the_invoice():
+    """CLAUDE.md law 4 / master doc §3.4 word the cap "per debtor/customer".
+    This invoice has been contacted ZERO times; two of its debtor's OTHER
+    invoices were contacted this week. The law says the human is out of budget,
+    so a third message must be blocked even though this entity is untouched."""
+    untouched_invoice = entity(entity_id="INV-003", state="ESCALATE_1", touches=[])
+    debtor_touches = [NOW - dt.timedelta(days=1), NOW - dt.timedelta(days=3)]  # INV-001, INV-002
+
+    per_invoice_only = sm.check_bounds(untouched_invoice, "message", {"stage": "firm"}, NOW)
+    assert per_invoice_only.allowed, "sanity: nothing about THIS invoice blocks it"
+
+    result = sm.check_bounds(untouched_invoice, "message", {"stage": "firm"}, NOW, debtor_touches)
+    assert not result.allowed
+    assert "max_touches_per_week" in result.reason
+    assert "debtor" in result.reason
+
+
+@pytest.mark.parametrize("kind", sorted(sm.TouchKind.__args__))
+def test_every_touch_kind_is_capped_per_debtor(kind: str):
+    """A mandate offer and a payment link are outbound contacts too — the cap
+    can't be dodged by switching instrument."""
+    e = entity(state="ESCALATE_1", invoice_amount_inr=40000)
+    debtor_touches = [NOW - dt.timedelta(days=2), NOW - dt.timedelta(hours=6)]
+    result = sm.check_bounds(e, kind, {"amount_inr": 40000, "stage": "firm"}, NOW, debtor_touches)
+    assert not result.allowed
+    assert "max_touches_per_week" in result.reason
+
+
+def test_debtor_touch_window_also_rolls_off_after_seven_days():
+    """The cap is a rolling window, not a lifetime budget — a debtor contacted
+    twice last week is contactable again this week."""
+    e = entity(state="ESCALATE_1", touches=[])
+    stale = [NOW - dt.timedelta(days=8), NOW - dt.timedelta(days=7, minutes=1)]
+    assert sm.check_bounds(e, "message", {"stage": "firm"}, NOW, stale).allowed
+
+    one_fresh = [*stale, NOW - dt.timedelta(days=1)]
+    assert sm.check_bounds(e, "message", {"stage": "firm"}, NOW, one_fresh).allowed
+    two_fresh = [*one_fresh, NOW - dt.timedelta(days=2)]
+    assert not sm.check_bounds(e, "message", {"stage": "firm"}, NOW, two_fresh).allowed
+
+
+def test_check_bounds_stays_a_pure_predicate():
+    """It reads no hidden state and mutates nothing — the reason it can be the
+    single gate every action passes through."""
+    before = entity(state="ESCALATE_1", touches=[NOW - dt.timedelta(days=1)], invoice_amount_inr=40000)
+    snapshot = before.model_dump()
+    debtor_touches = [NOW - dt.timedelta(days=1), NOW - dt.timedelta(days=2)]
+    debtor_snapshot = list(debtor_touches)
+
+    sm.check_bounds(before, "message", {"stage": "firm"}, NOW, debtor_touches)
+    sm.check_bounds(before, "mandate_offer", {"amount_inr": 40000}, NOW, debtor_touches)
+
+    assert before.model_dump() == snapshot
+    assert debtor_touches == debtor_snapshot
 
 
 def test_bound_renegotiation_cap():

@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 # nothing here is ever computed from an LLM output.
 # ---------------------------------------------------------------------------
 
-MAX_TOUCHES_PER_WEEK = 2
+MAX_TOUCHES_PER_WEEK = 2  # PER DEBTOR, across every entity they hold — see check_bounds
 TOUCH_WINDOW_DAYS = 7
 RENEGOTIATION_CAP = 2
 MANDATE_AMOUNT_CAP = 100_000
@@ -61,6 +61,10 @@ class EntityState(BaseModel):
     retry_count: int = 0
     mandate_refused: bool = False
     touches: list[dt.datetime] = Field(default_factory=list)
+    """This ENTITY's own outbound touches. Kept per-entity because per-invoice
+    history is what the funnel, the Tier-0 "0 touches" claim and the dashboard
+    timeline read. It is NOT what the touch cap is measured against — bound #4
+    is per DEBTOR, see check_bounds()'s `debtor_touches` argument."""
     invoice_amount_inr: int | None = None
     step_count: int = 0
 
@@ -70,9 +74,32 @@ class BoundsResult(BaseModel):
     reason: str
 
 
-def check_bounds(entity: EntityState, action_kind: str, params: dict[str, Any], now: dt.datetime) -> BoundsResult:
+def check_bounds(
+    entity: EntityState,
+    action_kind: str,
+    params: dict[str, Any],
+    now: dt.datetime,
+    debtor_touches: list[dt.datetime] | None = None,
+) -> BoundsResult:
     """The single gate every action passes through before it executes
-    (CLAUDE.md law #4). Pure predicate — never mutates `entity`."""
+    (CLAUDE.md law #4). Pure predicate — never mutates `entity`, never reads
+    hidden state: everything it needs is an argument.
+
+    `debtor_touches` is every outbound touch already made to the DEBTOR who
+    owns this entity, across ALL of their entities (invoices, carts). The
+    touch cap is worded per debtor in both CLAUDE.md law 4 and master doc §3.4
+    ("max_touches_per_week = 2 (per debtor/customer)"), so it is counted per
+    debtor here: a debtor holding five overdue invoices gets at most two
+    messages a week in total, not two per invoice. We throttle the human, not
+    the invoice.
+
+    Passing it is the caller's job (the Ledger keeps `touches_by_debtor` and
+    hands the right list in). When it is omitted the entity is treated as its
+    own debtor and its own `touches` are used — the right answer for a
+    single-entity debtor, and never more permissive than the old per-entity
+    behaviour. The Ledger always guarantees the debtor list is a superset of
+    the entity's own touches, so the two never disagree in production.
+    """
     if entity.state in TERMINAL_STATES and action_kind in OUTBOUND_KINDS:
         return BoundsResult(allowed=False, reason=f"entity in terminal state {entity.state}, no further outbound actions")
 
@@ -96,9 +123,14 @@ def check_bounds(entity: EntityState, action_kind: str, params: dict[str, Any], 
     if action_kind in ("message", "link", "mandate_offer", "voice"):
         if params.get("stage") == "legal":
             return BoundsResult(allowed=False, reason="legal-stage notices go to the merchant for review; the agent never sends legal communication itself")
-        recent = [t for t in entity.touches if (now - t).days < TOUCH_WINDOW_DAYS]
+        window = entity.touches if debtor_touches is None else debtor_touches
+        recent = [t for t in window if (now - t).days < TOUCH_WINDOW_DAYS]
         if len(recent) >= MAX_TOUCHES_PER_WEEK:
-            return BoundsResult(allowed=False, reason=f"max_touches_per_week ({MAX_TOUCHES_PER_WEEK}) exceeded")
+            scope = "this entity" if debtor_touches is None else "this debtor's entities"
+            return BoundsResult(
+                allowed=False,
+                reason=f"max_touches_per_week ({MAX_TOUCHES_PER_WEEK}) exceeded across {scope}",
+            )
 
     return BoundsResult(allowed=True, reason="ok")
 
