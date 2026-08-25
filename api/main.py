@@ -1,41 +1,48 @@
-"""FastAPI skeleton: events in, state out (BUILD.md §4.1). Wired to the real
-judgment layer (engine/judgment/ledger.py) with the dataset loaded at
-startup. Perception/Razorpay routes are NOT wired live yet — Phase B/C.
+"""FastAPI: events in, state out (BUILD.md §4.1) — and, since packet P2, the
+TIME-WARP driver (master doc §4.2).
+
+The app owns a module-level `WorldRunner` (engine/integration/runner.py): the
+virtual clock, the real Ledger, the Messenger, the Sentinel, the seeded rng and
+the perception provider. `POST /advance` runs virtual days through the REAL
+pipeline, which is what makes "press Advance-Day and money moves on screen"
+true rather than staged.
+
+`ledger` stays as an alias to `runner.ledger`, so every pre-existing route
+(and every pre-existing test) keeps working unchanged, and `POST /events`
+remains available for manual event injection in tests and demos.
 """
 
 import datetime as dt
 import json
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from engine.judgment.ledger import Ledger
-from engine.schemas import Invoice
+from engine.integration.runner import WorldRunner
 
-ROOT = Path(__file__).resolve().parent.parent
-ledger = Ledger()
+MAX_ADVANCE_DAYS = 365
+
+runner = WorldRunner()
+ledger = runner.ledger
 
 
-def _load_dataset() -> None:
-    invoices = json.loads((ROOT / "data" / "invoices.json").read_text(encoding="utf-8"))
-    for row in invoices:
-        ledger.register_invoice(Invoice.model_validate(row))
-
-    carts = json.loads((ROOT / "data" / "carts.json").read_text(encoding="utf-8"))
-    for row in carts:
-        if row["reserve_active"]:
-            ledger.register_reserve(row["id"], True)
+def _reset_world() -> None:
+    """Rebuild the world from the dataset on every startup. Rebinding both
+    globals (rather than mutating in place) keeps each app lifespan — and so
+    each TestClient context — a clean, reproducible day 0."""
+    global runner, ledger
+    runner = WorldRunner()
+    ledger = runner.ledger
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    _load_dataset()
+    _reset_world()
     yield
 
 
-app = FastAPI(title="Promise Keeper API", version="0.1.0-phase-a", lifespan=lifespan)
+app = FastAPI(title="Promise Keeper API", version="0.2.0-phase-b", lifespan=lifespan)
 
 
 class EventIn(BaseModel):
@@ -45,9 +52,33 @@ class EventIn(BaseModel):
     ts: dt.datetime | None = None
 
 
+class AdvanceIn(BaseModel):
+    days: int = Field(default=1, ge=1, le=MAX_ADVANCE_DAYS)
+
+
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "invoices_loaded": len(ledger.debtor_of), "reserves_active": len(ledger.reserve_active)}
+    return {"status": "ok", "invoices_loaded": len(runner.invoices), "reserves_active": len(ledger.reserve_active)}
+
+
+@app.post("/advance")
+def advance(body: AdvanceIn | None = None) -> dict:
+    """The TIME-WARP button. `{"days": 1}` = "Advance 1 Day ▶",
+    `{"days": 45}` = "Run to Day 45 ⏩". Every state change it produces went
+    through `ledger.process_event` -> `check_bounds()` -> audit-before-action."""
+    return runner.advance((body or AdvanceIn()).days)
+
+
+@app.get("/world")
+def world() -> dict:
+    """Clock + provider + counts — the System Health screen's header."""
+    return runner.world_summary()
+
+
+@app.get("/funnel")
+def funnel() -> dict:
+    """The funnel/₹-recovered read model, without advancing anything."""
+    return runner.funnel_summary()
 
 
 @app.post("/events")
