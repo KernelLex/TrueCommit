@@ -1,0 +1,39 @@
+{
+  "thread_id": "T-18",
+  "invoice_id": "INV-047",
+  "channel": "email",
+  "messages": [
+    {
+      "id": "M-18-1",
+      "thread_id": "T-18",
+      "direction": "out",
+      "channel": "email",
+      "text": "INV-047 (Rs.4,50,000) is 5 days overdue \u2014 flagging early given the amount.",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-18-2",
+      "thread_id": "T-18",
+      "direction": "in",
+      "channel": "email",
+      "text": "We expect to clear this by the second week of next month.",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-18-3",
+      "thread_id": "T-18",
+      "direction": "out",
+      "channel": "email",
+      "text": "Thanks \u2014 could you confirm an exact date closer to then so we can plan cash flow on our end too?",
+      "ts": "2026-08-28T16:00:00"
+    },
+    {
+      "id": "M-18-4",
+      "thread_id": "T-18",
+      "direction": "in",
+      "channel": "email",
+      "text": "Let's fix it at the 10th, Rs.4,50,000 in full.",
+      "ts": "2026-08-29T10:00:00"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "thread_id": "T-09",
+  "invoice_id": "INV-021",
+  "channel": "wa",
+  "messages": [
+    {
+      "id": "M-09-1",
+      "thread_id": "T-09",
+      "direction": "out",
+      "channel": "wa",
+      "text": "Hi Om Sai Enterprises, invoice INV-021 (Rs.8,500) is 35 days overdue. Please respond at your earliest.",
+      "ts": "2026-08-26T10:00:00"
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "thread_id": "T-05",
+  "invoice_id": "INV-011",
+  "channel": "wa",
+  "messages": [
+    {
+      "id": "M-05-1",
+      "thread_id": "T-05",
+      "direction": "out",
+      "channel": "wa",
+      "text": "INV-011 (Rs.97,000) is now 28 days overdue \u2014 this is our third follow-up.",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-05-2",
+      "thread_id": "T-05",
+      "direction": "in",
+      "channel": "wa",
+      "text": "this is already paid, check again",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-05-3",
+      "thread_id": "T-05",
+      "direction": "out",
+      "channel": "wa",
+      "text": "Our records show no payment received against INV-011 \u2014 could you share a UTR/reference number?",
+      "ts": "2026-08-28T16:00:00"
+    },
+    {
+      "id": "M-05-4",
+      "thread_id": "T-05",
+      "direction": "in",
+      "channel": "wa",
+      "text": "actually let me check with accounts, might not have gone through",
+      "ts": "2026-08-29T10:00:00"
+    },
+    {
+      "id": "M-05-5",
+      "thread_id": "T-05",
+      "direction": "in",
+      "channel": "wa",
+      "text": "ok it didn't go through, will redo the transfer for 97000 by next Wednesday",
+      "ts": "2026-08-30T13:00:00"
+    }
+  ]
+}

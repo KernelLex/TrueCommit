@@ -1,0 +1,47 @@
+{
+  "thread_id": "T-17",
+  "invoice_id": "INV-046",
+  "channel": "wa",
+  "messages": [
+    {
+      "id": "M-17-1",
+      "thread_id": "T-17",
+      "direction": "out",
+      "channel": "wa",
+      "text": "INV-046 (Rs.68,000) is 11 days overdue.",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-17-2",
+      "thread_id": "T-17",
+      "direction": "in",
+      "channel": "wa",
+      "text": "it's on our radar, just going through a slow patch",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-17-3",
+      "thread_id": "T-17",
+      "direction": "out",
+      "channel": "wa",
+      "text": "Understood \u2014 can you give us even a rough week to target?",
+      "ts": "2026-08-28T16:00:00"
+    },
+    {
+      "id": "M-17-4",
+      "thread_id": "T-17",
+      "direction": "in",
+      "channel": "wa",
+      "text": "maybe next week, can't promise exactly",
+      "ts": "2026-08-29T10:00:00"
+    },
+    {
+      "id": "M-17-5",
+      "thread_id": "T-17",
+      "direction": "in",
+      "channel": "wa",
+      "text": "ok let's commit to 68000 by next Tuesday",
+      "ts": "2026-08-30T13:00:00"
+    }
+  ]
+}

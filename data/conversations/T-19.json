@@ -1,0 +1,55 @@
+{
+  "thread_id": "T-19",
+  "invoice_id": "INV-051",
+  "channel": "wa",
+  "messages": [
+    {
+      "id": "M-19-1",
+      "thread_id": "T-19",
+      "direction": "out",
+      "channel": "wa",
+      "text": "INV-051 (Rs.1,24,000) is 31 days overdue, this has gone unanswered a few times now.",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-19-2",
+      "thread_id": "T-19",
+      "direction": "in",
+      "channel": "wa",
+      "text": "yeah sorry, been swamped, will sort it soon",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-19-3",
+      "thread_id": "T-19",
+      "direction": "out",
+      "channel": "wa",
+      "text": "Can you give us a specific date, even a rough one?",
+      "ts": "2026-08-28T16:00:00"
+    },
+    {
+      "id": "M-19-4",
+      "thread_id": "T-19",
+      "direction": "in",
+      "channel": "wa",
+      "text": "let's say this week",
+      "ts": "2026-08-29T10:00:00"
+    },
+    {
+      "id": "M-19-5",
+      "thread_id": "T-19",
+      "direction": "out",
+      "channel": "wa",
+      "text": "Which day this week works for the full Rs.1,24,000?",
+      "ts": "2026-08-30T13:00:00"
+    },
+    {
+      "id": "M-19-6",
+      "thread_id": "T-19",
+      "direction": "in",
+      "channel": "wa",
+      "text": "will confirm by tomorrow",
+      "ts": "2026-08-31T16:00:00"
+    }
+  ]
+}

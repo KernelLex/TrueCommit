@@ -1,0 +1,31 @@
+{
+  "thread_id": "T-15",
+  "invoice_id": "INV-041",
+  "channel": "wa",
+  "messages": [
+    {
+      "id": "M-15-1",
+      "thread_id": "T-15",
+      "direction": "out",
+      "channel": "wa",
+      "text": "INV-041 (Rs.27,000) is 8 days overdue.",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-15-2",
+      "thread_id": "T-15",
+      "direction": "in",
+      "channel": "wa",
+      "text": "we'll clear this once our client's payment comes in, they said it's processing \u2014 should be this week hopefully",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-15-3",
+      "thread_id": "T-15",
+      "direction": "out",
+      "channel": "wa",
+      "text": "Understood \u2014 please keep us posted, and let us know the moment that clears.",
+      "ts": "2026-08-28T16:00:00"
+    }
+  ]
+}

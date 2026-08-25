@@ -1,0 +1,47 @@
+{
+  "thread_id": "T-22",
+  "invoice_id": "INV-057",
+  "channel": "email",
+  "messages": [
+    {
+      "id": "M-22-1",
+      "thread_id": "T-22",
+      "direction": "out",
+      "channel": "email",
+      "text": "INV-057 (Rs.93,000) is 44 days overdue \u2014 please respond, this has been outstanding a long time.",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-22-2",
+      "thread_id": "T-22",
+      "direction": "in",
+      "channel": "email",
+      "text": "Apologies for the delay. We will process Rs.93,000 by this Friday without fail.",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-22-3",
+      "thread_id": "T-22",
+      "direction": "out",
+      "channel": "email",
+      "text": "Following up \u2014 Friday's date passed without payment landing, could you update us?",
+      "ts": "2026-08-28T16:00:00"
+    },
+    {
+      "id": "M-22-4",
+      "thread_id": "T-22",
+      "direction": "in",
+      "channel": "email",
+      "text": "Sorry, ran into an unexpected issue. Will process it early next week instead.",
+      "ts": "2026-08-29T10:00:00"
+    },
+    {
+      "id": "M-22-5",
+      "thread_id": "T-22",
+      "direction": "in",
+      "channel": "email",
+      "text": "To be safe, let's say Rs.93,000 by next Wednesday.",
+      "ts": "2026-08-30T13:00:00"
+    }
+  ]
+}

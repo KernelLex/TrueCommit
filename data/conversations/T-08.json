@@ -1,0 +1,39 @@
+{
+  "thread_id": "T-08",
+  "invoice_id": "INV-017",
+  "channel": "wa",
+  "messages": [
+    {
+      "id": "M-08-1",
+      "thread_id": "T-08",
+      "direction": "out",
+      "channel": "wa",
+      "text": "INV-017, Rs.76,000, 15 days overdue.",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-08-2",
+      "thread_id": "T-08",
+      "direction": "in",
+      "channel": "wa",
+      "text": "trying my best on this one, things are tight right now",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-08-3",
+      "thread_id": "T-08",
+      "direction": "out",
+      "channel": "wa",
+      "text": "Understood. Can you give us a rough date so we can plan?",
+      "ts": "2026-08-28T16:00:00"
+    },
+    {
+      "id": "M-08-4",
+      "thread_id": "T-08",
+      "direction": "in",
+      "channel": "wa",
+      "text": "ok let's say 76000 by the 5th of next month",
+      "ts": "2026-08-29T10:00:00"
+    }
+  ]
+}

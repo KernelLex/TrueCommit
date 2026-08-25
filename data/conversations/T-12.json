@@ -1,0 +1,39 @@
+{
+  "thread_id": "T-12",
+  "invoice_id": "INV-031",
+  "channel": "wa",
+  "messages": [
+    {
+      "id": "M-12-1",
+      "thread_id": "T-12",
+      "direction": "out",
+      "channel": "wa",
+      "text": "INV-031 (Rs.2,15,000) is 20 days overdue.",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-12-2",
+      "thread_id": "T-12",
+      "direction": "in",
+      "channel": "wa",
+      "text": "we're not paying this, the upholstery set arrived with 3 damaged panels, raised this with your team weeks ago",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-12-3",
+      "thread_id": "T-12",
+      "direction": "out",
+      "channel": "wa",
+      "text": "I'm sorry to hear that \u2014 logging this as a dispute and pulling the delivery/quality records now. Someone from our team will reach out with next steps, no further payment reminders will go out on this invoice until it's resolved.",
+      "ts": "2026-08-28T16:00:00"
+    },
+    {
+      "id": "M-12-4",
+      "thread_id": "T-12",
+      "direction": "in",
+      "channel": "wa",
+      "text": "fine, waiting to hear back",
+      "ts": "2026-08-29T10:00:00"
+    }
+  ]
+}

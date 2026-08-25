@@ -1,0 +1,39 @@
+{
+  "thread_id": "T-14",
+  "invoice_id": "INV-036",
+  "channel": "wa",
+  "messages": [
+    {
+      "id": "M-14-1",
+      "thread_id": "T-14",
+      "direction": "out",
+      "channel": "wa",
+      "text": "INV-036 (Rs.58,000) is 14 days overdue.",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-14-2",
+      "thread_id": "T-14",
+      "direction": "in",
+      "channel": "wa",
+      "text": "not paying, we never received this order",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-14-3",
+      "thread_id": "T-14",
+      "direction": "out",
+      "channel": "wa",
+      "text": "Our delivery record shows INV-036 was signed for on receipt \u2014 I'll attach the POD and have this reviewed as a dispute.",
+      "ts": "2026-08-28T16:00:00"
+    },
+    {
+      "id": "M-14-4",
+      "thread_id": "T-14",
+      "direction": "in",
+      "channel": "wa",
+      "text": "send the POD then, will check internally",
+      "ts": "2026-08-29T10:00:00"
+    }
+  ]
+}

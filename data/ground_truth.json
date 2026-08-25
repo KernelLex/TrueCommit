@@ -1,0 +1,488 @@
+{
+  "messages": {
+    "M-01-2": {
+      "level": "L1",
+      "amount_inr": 40000,
+      "date": "2026-08-28",
+      "condition": null
+    },
+    "M-01-4": {
+      "level": "L1",
+      "amount_inr": 40000,
+      "date": "2026-08-28",
+      "condition": null
+    },
+    "M-02-2": {
+      "level": "L1",
+      "amount_inr": 22000,
+      "date": "2026-08-31",
+      "condition": null
+    },
+    "M-02-4": {
+      "level": "L4",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-03-2": {
+      "level": "L2",
+      "amount_inr": null,
+      "date": "2026-08-31",
+      "condition": null
+    },
+    "M-03-4": {
+      "level": "L4",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-04-2": {
+      "level": "L1",
+      "amount_inr": 63000,
+      "date": "2026-08-27",
+      "condition": null
+    },
+    "M-05-2": {
+      "level": "L5",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-05-4": {
+      "level": "L4",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-05-5": {
+      "level": "L1",
+      "amount_inr": 97000,
+      "date": "2026-09-02",
+      "condition": null
+    },
+    "M-06-2": {
+      "level": "L3",
+      "amount_inr": 27000,
+      "date": null,
+      "condition": "half (27000) now, remaining half in ~2 weeks \u2014 exact date not given"
+    },
+    "M-06-4": {
+      "level": "L3",
+      "amount_inr": 27000,
+      "date": null,
+      "condition": "Rs.27,000 (this tranche) sent today; remaining Rs.27,000 due by the 15th"
+    },
+    "M-07-2": {
+      "level": "L1",
+      "amount_inr": 310000,
+      "date": "2026-08-28",
+      "condition": null
+    },
+    "M-07-4": {
+      "level": "L4",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-08-2": {
+      "level": "L4",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-08-4": {
+      "level": "L1",
+      "amount_inr": 76000,
+      "date": "2026-09-05",
+      "condition": null
+    },
+    "M-10-2": {
+      "level": "L5",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-12-2": {
+      "level": "L5",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-12-4": {
+      "level": "L5",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-13-2": {
+      "level": "L5",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-14-2": {
+      "level": "L5",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-14-4": {
+      "level": "L5",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-15-2": {
+      "level": "L3",
+      "amount_inr": 27000,
+      "date": null,
+      "condition": "contingent on debtor's own client payment clearing, expected 'this week' but unconfirmed"
+    },
+    "M-16-2": {
+      "level": "L3",
+      "amount_inr": 45000,
+      "date": "2026-08-31",
+      "condition": "partial payment: Rs.45,000 now, remaining Rs.1,00,000 by month end"
+    },
+    "M-16-4": {
+      "level": "L2",
+      "amount_inr": 45000,
+      "date": null,
+      "condition": null
+    },
+    "M-17-2": {
+      "level": "L4",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-17-4": {
+      "level": "L4",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-17-5": {
+      "level": "L1",
+      "amount_inr": 68000,
+      "date": "2026-09-01",
+      "condition": null
+    },
+    "M-18-2": {
+      "level": "L2",
+      "amount_inr": null,
+      "date": "2026-09-10",
+      "condition": null
+    },
+    "M-18-4": {
+      "level": "L1",
+      "amount_inr": 450000,
+      "date": "2026-09-10",
+      "condition": null
+    },
+    "M-19-2": {
+      "level": "L4",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-19-4": {
+      "level": "L4",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-19-6": {
+      "level": "L4",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-20-2": {
+      "level": "L4",
+      "amount_inr": null,
+      "date": null,
+      "condition": "contingent on accountant returning \u2014 no date given for return"
+    },
+    "M-20-4": {
+      "level": "L4",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-20-5": {
+      "level": "L4",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-21-2": {
+      "level": "L4",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-21-4": {
+      "level": "L4",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-22-2": {
+      "level": "L1",
+      "amount_inr": 93000,
+      "date": "2026-08-28",
+      "condition": null
+    },
+    "M-22-4": {
+      "level": "L2",
+      "amount_inr": null,
+      "date": "2026-09-07",
+      "condition": null
+    },
+    "M-22-5": {
+      "level": "L1",
+      "amount_inr": 93000,
+      "date": "2026-09-09",
+      "condition": null
+    },
+    "M-23-2": {
+      "level": "L2",
+      "amount_inr": 31000,
+      "date": null,
+      "condition": null
+    },
+    "M-23-4": {
+      "level": "L4",
+      "amount_inr": null,
+      "date": null,
+      "condition": null
+    },
+    "M-24-2": {
+      "level": "L3",
+      "amount_inr": 19000,
+      "date": null,
+      "condition": "contingent on a pending refund from debtor's own supplier, timing unconfirmed"
+    }
+  },
+  "invoices": {
+    "INV-001": {
+      "cause": "cashflow_delay"
+    },
+    "INV-002": {
+      "cause": "cashflow_delay"
+    },
+    "INV-006": {
+      "cause": "cashflow_delay"
+    },
+    "INV-007": {
+      "cause": "cashflow_delay"
+    },
+    "INV-011": {
+      "cause": "payment_failed"
+    },
+    "INV-012": {
+      "cause": "cashflow_delay"
+    },
+    "INV-016": {
+      "cause": "payment_failed"
+    },
+    "INV-017": {
+      "cause": "cashflow_delay"
+    },
+    "INV-021": {
+      "cause": "non_responsive"
+    },
+    "INV-022": {
+      "cause": "non_responsive"
+    },
+    "INV-026": {
+      "cause": "non_responsive"
+    },
+    "INV-031": {
+      "cause": "dispute"
+    },
+    "INV-032": {
+      "cause": "dispute"
+    },
+    "INV-036": {
+      "cause": "dispute"
+    },
+    "INV-041": {
+      "cause": "cashflow_delay"
+    },
+    "INV-042": {
+      "cause": "cashflow_delay"
+    },
+    "INV-046": {
+      "cause": "cashflow_delay"
+    },
+    "INV-047": {
+      "cause": "cashflow_delay"
+    },
+    "INV-051": {
+      "cause": "cashflow_delay"
+    },
+    "INV-052": {
+      "cause": "non_responsive"
+    },
+    "INV-056": {
+      "cause": "cashflow_delay"
+    },
+    "INV-057": {
+      "cause": "non_responsive"
+    },
+    "INV-003": {
+      "cause": "cashflow_delay"
+    },
+    "INV-043": {
+      "cause": "cashflow_delay"
+    },
+    "INV-061": {
+      "cause": "cashflow_delay"
+    },
+    "INV-062": {
+      "cause": "cashflow_delay"
+    },
+    "INV-063": {
+      "cause": "non_responsive"
+    },
+    "INV-064": {
+      "cause": "cashflow_delay"
+    },
+    "INV-065": {
+      "cause": "cashflow_delay"
+    },
+    "INV-066": {
+      "cause": "cashflow_delay"
+    },
+    "INV-067": {
+      "cause": "payment_failed"
+    },
+    "INV-068": {
+      "cause": "cashflow_delay"
+    },
+    "INV-069": {
+      "cause": "cashflow_delay"
+    },
+    "INV-070": {
+      "cause": "cashflow_delay"
+    },
+    "INV-071": {
+      "cause": "cashflow_delay"
+    },
+    "INV-072": {
+      "cause": "cashflow_delay"
+    },
+    "INV-073": {
+      "cause": "non_responsive"
+    },
+    "INV-074": {
+      "cause": "non_responsive"
+    },
+    "INV-075": {
+      "cause": "non_responsive"
+    },
+    "INV-076": {
+      "cause": "non_responsive"
+    },
+    "INV-077": {
+      "cause": "cashflow_delay"
+    },
+    "INV-078": {
+      "cause": "non_responsive"
+    },
+    "INV-079": {
+      "cause": "delivery_dispute"
+    },
+    "INV-080": {
+      "cause": "dispute"
+    },
+    "INV-081": {
+      "cause": "delivery_dispute"
+    },
+    "INV-082": {
+      "cause": "dispute"
+    },
+    "INV-083": {
+      "cause": "dispute"
+    },
+    "INV-084": {
+      "cause": "cashflow_delay"
+    },
+    "INV-085": {
+      "cause": "delivery_dispute"
+    },
+    "INV-086": {
+      "cause": "cashflow_delay"
+    },
+    "INV-087": {
+      "cause": "cashflow_delay"
+    },
+    "INV-088": {
+      "cause": "cashflow_delay"
+    },
+    "INV-089": {
+      "cause": "cashflow_delay"
+    },
+    "INV-090": {
+      "cause": "payment_failed"
+    },
+    "INV-091": {
+      "cause": "non_responsive"
+    },
+    "INV-092": {
+      "cause": "cashflow_delay"
+    },
+    "INV-093": {
+      "cause": "non_responsive"
+    },
+    "INV-094": {
+      "cause": "cashflow_delay"
+    },
+    "INV-095": {
+      "cause": "non_responsive"
+    },
+    "INV-096": {
+      "cause": "non_responsive"
+    }
+  },
+  "carts": {
+    "C-01": {
+      "cause": "friction"
+    },
+    "C-02": {
+      "cause": "friction"
+    },
+    "C-03": {
+      "cause": "price_shock"
+    },
+    "C-04": {
+      "cause": "price_shock"
+    },
+    "C-05": {
+      "cause": "timing"
+    },
+    "C-06": {
+      "cause": "comparison"
+    },
+    "C-07": {
+      "cause": "trust"
+    },
+    "C-08": {
+      "cause": "trust"
+    },
+    "C-09": {
+      "cause": "friction"
+    },
+    "C-10": {
+      "cause": "friction"
+    },
+    "C-11": {
+      "cause": "unknown"
+    },
+    "C-12": {
+      "cause": "unknown"
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "thread_id": "T-02",
+  "invoice_id": "INV-002",
+  "channel": "wa",
+  "messages": [
+    {
+      "id": "M-02-1",
+      "thread_id": "T-02",
+      "direction": "out",
+      "channel": "wa",
+      "text": "Reminder: INV-002 (Rs.22,000) is 6 days overdue.",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-02-2",
+      "thread_id": "T-02",
+      "direction": "in",
+      "channel": "wa",
+      "text": "will pay 22000 by Monday, but I don't do auto-debit setups, I'll just transfer manually",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-02-3",
+      "thread_id": "T-02",
+      "direction": "out",
+      "channel": "wa",
+      "text": "No problem \u2014 manual is fine. We'll send a reminder Sunday evening and confirm once it lands.",
+      "ts": "2026-08-28T16:00:00"
+    },
+    {
+      "id": "M-02-4",
+      "thread_id": "T-02",
+      "direction": "in",
+      "channel": "wa",
+      "text": "sounds good",
+      "ts": "2026-08-29T10:00:00"
+    }
+  ]
+}

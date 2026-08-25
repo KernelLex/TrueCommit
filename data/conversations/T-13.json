@@ -1,0 +1,31 @@
+{
+  "thread_id": "T-13",
+  "invoice_id": "INV-032",
+  "channel": "email",
+  "messages": [
+    {
+      "id": "M-13-1",
+      "thread_id": "T-13",
+      "direction": "out",
+      "channel": "email",
+      "text": "INV-032 (Rs.89,000) is 25 days overdue, please advise.",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-13-2",
+      "thread_id": "T-13",
+      "direction": "in",
+      "channel": "email",
+      "text": "This fabric lot does not match the sample approved in March. We are disputing this invoice in full and considering a return.",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-13-3",
+      "thread_id": "T-13",
+      "direction": "out",
+      "channel": "email",
+      "text": "Understood, marking this as disputed and routing to our team with the full order history for review.",
+      "ts": "2026-08-28T16:00:00"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "thread_id": "T-11",
+  "invoice_id": "INV-026",
+  "channel": "email",
+  "messages": [
+    {
+      "id": "M-11-1",
+      "thread_id": "T-11",
+      "direction": "out",
+      "channel": "email",
+      "text": "Invoice INV-026 (Rs.1,32,000) is 33 days overdue \u2014 this is our second notice. Please respond.",
+      "ts": "2026-08-26T10:00:00"
+    }
+  ]
+}

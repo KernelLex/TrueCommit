@@ -1,0 +1,47 @@
+{
+  "thread_id": "T-01",
+  "invoice_id": "INV-001",
+  "channel": "wa",
+  "messages": [
+    {
+      "id": "M-01-1",
+      "thread_id": "T-01",
+      "direction": "out",
+      "channel": "wa",
+      "text": "Hi Acme Traders, invoice INV-001 for Rs.40,000 is now 12 days overdue. Could you let us know when we can clear it?",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-01-2",
+      "thread_id": "T-01",
+      "direction": "in",
+      "channel": "wa",
+      "text": "boss month end tight, will clear 40k by Friday pakka",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-01-3",
+      "thread_id": "T-01",
+      "direction": "out",
+      "channel": "wa",
+      "text": "Understood. I can set up a one-time mandate so Rs.40,000 auto-debits Friday \u2014 no need to remember. Want that, or will you pay manually?",
+      "ts": "2026-08-28T16:00:00"
+    },
+    {
+      "id": "M-01-4",
+      "thread_id": "T-01",
+      "direction": "in",
+      "channel": "wa",
+      "text": "haan set it up, easier for me",
+      "ts": "2026-08-29T10:00:00"
+    },
+    {
+      "id": "M-01-5",
+      "thread_id": "T-01",
+      "direction": "out",
+      "channel": "wa",
+      "text": "Done \u2014 mandate registration link sent. You'll get a reminder the day before.",
+      "ts": "2026-08-30T13:00:00"
+    }
+  ]
+}

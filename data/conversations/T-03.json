@@ -1,0 +1,39 @@
+{
+  "thread_id": "T-03",
+  "invoice_id": "INV-006",
+  "channel": "email",
+  "messages": [
+    {
+      "id": "M-03-1",
+      "thread_id": "T-03",
+      "direction": "out",
+      "channel": "email",
+      "text": "Invoice INV-006 (Rs.1,85,000) is 9 days past due. Please advise on timing.",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-03-2",
+      "thread_id": "T-03",
+      "direction": "in",
+      "channel": "email",
+      "text": "We will clear the outstanding by month end, cash flow is tied up in a large receivable that's due any day now.",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-03-3",
+      "thread_id": "T-03",
+      "direction": "out",
+      "channel": "email",
+      "text": "Noted, thank you. We'll check in closer to month end.",
+      "ts": "2026-08-28T16:00:00"
+    },
+    {
+      "id": "M-03-4",
+      "thread_id": "T-03",
+      "direction": "in",
+      "channel": "email",
+      "text": "Appreciate it.",
+      "ts": "2026-08-29T10:00:00"
+    }
+  ]
+}

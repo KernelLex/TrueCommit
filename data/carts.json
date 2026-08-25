@@ -1,0 +1,236 @@
+[
+  {
+    "id": "C-01",
+    "customer_id": "CUST-01",
+    "amount_inr": 2499,
+    "items": [
+      {
+        "sku": "SKU-SHIRT-M",
+        "name": "Cotton Shirt - M",
+        "qty": 1,
+        "price_inr": 2499
+      }
+    ],
+    "drop_stage": "payment",
+    "drop_signals": [
+      "otp_fail",
+      "otp_fail"
+    ],
+    "ts": "2026-08-25T19:30:00",
+    "reserve_active": false
+  },
+  {
+    "id": "C-02",
+    "customer_id": "CUST-02",
+    "amount_inr": 8990,
+    "items": [
+      {
+        "sku": "SKU-SHOE-42",
+        "name": "Running Shoes - 42",
+        "qty": 1,
+        "price_inr": 8990
+      }
+    ],
+    "drop_stage": "payment",
+    "drop_signals": [
+      "upi_intent_timeout"
+    ],
+    "ts": "2026-08-24T19:30:00",
+    "reserve_active": false
+  },
+  {
+    "id": "C-03",
+    "customer_id": "CUST-03",
+    "amount_inr": 15499,
+    "items": [
+      {
+        "sku": "SKU-BAG-01",
+        "name": "Backpack",
+        "qty": 1,
+        "price_inr": 15499
+      }
+    ],
+    "drop_stage": "summary",
+    "drop_signals": [
+      "viewed_shipping_fee",
+      "left_after_shipping_shown"
+    ],
+    "ts": "2026-08-23T19:30:00",
+    "reserve_active": false
+  },
+  {
+    "id": "C-04",
+    "customer_id": "CUST-04",
+    "amount_inr": 3200,
+    "items": [
+      {
+        "sku": "SKU-KURTA-L",
+        "name": "Kurta - L",
+        "qty": 1,
+        "price_inr": 3200
+      }
+    ],
+    "drop_stage": "address",
+    "drop_signals": [
+      "viewed_shipping_fee"
+    ],
+    "ts": "2026-08-25T19:30:00",
+    "reserve_active": false
+  },
+  {
+    "id": "C-05",
+    "customer_id": "CUST-05",
+    "amount_inr": 2499,
+    "items": [
+      {
+        "sku": "SKU-SHIRT-M",
+        "name": "Cotton Shirt - M",
+        "qty": 1,
+        "price_inr": 2499
+      }
+    ],
+    "drop_stage": "summary",
+    "drop_signals": [
+      "salary_mentioned_in_support_chat"
+    ],
+    "ts": "2026-08-24T19:30:00",
+    "reserve_active": false
+  },
+  {
+    "id": "C-06",
+    "customer_id": "CUST-06",
+    "amount_inr": 47990,
+    "items": [
+      {
+        "sku": "SKU-TV-43",
+        "name": "43-inch TV",
+        "qty": 1,
+        "price_inr": 47990
+      }
+    ],
+    "drop_stage": "payment",
+    "drop_signals": [
+      "compared_prices_other_tab",
+      "returned_after_2h"
+    ],
+    "ts": "2026-08-22T19:30:00",
+    "reserve_active": false
+  },
+  {
+    "id": "C-07",
+    "customer_id": "CUST-07",
+    "amount_inr": 2499,
+    "items": [
+      {
+        "sku": "SKU-SHIRT-M",
+        "name": "Cotton Shirt - M",
+        "qty": 1,
+        "price_inr": 2499
+      }
+    ],
+    "drop_stage": "payment",
+    "drop_signals": [
+      "first_time_buyer",
+      "no_saved_card",
+      "cod_unavailable_pincode"
+    ],
+    "ts": "2026-08-25T19:30:00",
+    "reserve_active": false
+  },
+  {
+    "id": "C-08",
+    "customer_id": "CUST-08",
+    "amount_inr": 6499,
+    "items": [
+      {
+        "sku": "SKU-WATCH-01",
+        "name": "Analog Watch",
+        "qty": 1,
+        "price_inr": 6499
+      }
+    ],
+    "drop_stage": "payment",
+    "drop_signals": [
+      "first_time_buyer",
+      "reviews_page_revisited_3x"
+    ],
+    "ts": "2026-08-24T19:30:00",
+    "reserve_active": false
+  },
+  {
+    "id": "C-09",
+    "customer_id": "CUST-09",
+    "amount_inr": 1899,
+    "items": [
+      {
+        "sku": "SKU-TEE-S",
+        "name": "Graphic Tee - S",
+        "qty": 1,
+        "price_inr": 1899
+      }
+    ],
+    "drop_stage": "payment",
+    "drop_signals": [
+      "card_declined_insufficient_funds"
+    ],
+    "ts": "2026-08-25T19:30:00",
+    "reserve_active": true
+  },
+  {
+    "id": "C-10",
+    "customer_id": "CUST-10",
+    "amount_inr": 5250,
+    "items": [
+      {
+        "sku": "SKU-JEANS-32",
+        "name": "Jeans - 32",
+        "qty": 1,
+        "price_inr": 5250
+      }
+    ],
+    "drop_stage": "payment",
+    "drop_signals": [
+      "bank_server_error"
+    ],
+    "ts": "2026-08-24T19:30:00",
+    "reserve_active": true
+  },
+  {
+    "id": "C-11",
+    "customer_id": "CUST-11",
+    "amount_inr": 22990,
+    "items": [
+      {
+        "sku": "SKU-JACKET-L",
+        "name": "Winter Jacket - L",
+        "qty": 1,
+        "price_inr": 22990
+      }
+    ],
+    "drop_stage": "summary",
+    "drop_signals": [
+      "no_signal_low_activity"
+    ],
+    "ts": "2026-08-20T19:30:00",
+    "reserve_active": false
+  },
+  {
+    "id": "C-12",
+    "customer_id": "CUST-12",
+    "amount_inr": 3990,
+    "items": [
+      {
+        "sku": "SKU-CAP-01",
+        "name": "Cap Combo",
+        "qty": 2,
+        "price_inr": 1995
+      }
+    ],
+    "drop_stage": "address",
+    "drop_signals": [
+      "pincode_serviceability_check_failed_then_retried"
+    ],
+    "ts": "2026-08-23T19:30:00",
+    "reserve_active": false
+  }
+]

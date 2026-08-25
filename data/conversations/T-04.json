@@ -1,0 +1,31 @@
+{
+  "thread_id": "T-04",
+  "invoice_id": "INV-007",
+  "channel": "wa",
+  "messages": [
+    {
+      "id": "M-04-1",
+      "thread_id": "T-04",
+      "direction": "out",
+      "channel": "wa",
+      "text": "INV-007, Rs.63,000, 4 days overdue \u2014 any update?",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-04-2",
+      "thread_id": "T-04",
+      "direction": "in",
+      "channel": "wa",
+      "text": "yes paying 63000 this Thursday, slight delay from our side sorry",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-04-3",
+      "thread_id": "T-04",
+      "direction": "out",
+      "channel": "wa",
+      "text": "Thanks for the heads up, Thursday works.",
+      "ts": "2026-08-28T16:00:00"
+    }
+  ]
+}

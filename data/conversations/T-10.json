@@ -1,0 +1,31 @@
+{
+  "thread_id": "T-10",
+  "invoice_id": "INV-022",
+  "channel": "wa",
+  "messages": [
+    {
+      "id": "M-10-1",
+      "thread_id": "T-10",
+      "direction": "out",
+      "channel": "wa",
+      "text": "INV-022 (Rs.41,000) is 40 days overdue, no response to our last 2 messages.",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-10-2",
+      "thread_id": "T-10",
+      "direction": "in",
+      "channel": "wa",
+      "text": "ok",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-10-3",
+      "thread_id": "T-10",
+      "direction": "out",
+      "channel": "wa",
+      "text": "Can you give us a date we can expect payment by?",
+      "ts": "2026-08-28T16:00:00"
+    }
+  ]
+}

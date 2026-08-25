@@ -1,0 +1,47 @@
+{
+  "thread_id": "T-21",
+  "invoice_id": "INV-056",
+  "channel": "wa",
+  "messages": [
+    {
+      "id": "M-21-1",
+      "thread_id": "T-21",
+      "direction": "out",
+      "channel": "wa",
+      "text": "INV-056 (Rs.61,000) is 26 days overdue.",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-21-2",
+      "thread_id": "T-21",
+      "direction": "in",
+      "channel": "wa",
+      "text": "yes we intend to pay, just need a few more days",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-21-3",
+      "thread_id": "T-21",
+      "direction": "out",
+      "channel": "wa",
+      "text": "Would a payment link work better, or would you prefer we set a reminder for a specific date?",
+      "ts": "2026-08-28T16:00:00"
+    },
+    {
+      "id": "M-21-4",
+      "thread_id": "T-21",
+      "direction": "in",
+      "channel": "wa",
+      "text": "link is fine I guess, will use it when ready",
+      "ts": "2026-08-29T10:00:00"
+    },
+    {
+      "id": "M-21-5",
+      "thread_id": "T-21",
+      "direction": "out",
+      "channel": "wa",
+      "text": "Sent the payment link \u2014 let us know if you hit any issues.",
+      "ts": "2026-08-30T13:00:00"
+    }
+  ]
+}

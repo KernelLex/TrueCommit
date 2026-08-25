@@ -1,0 +1,47 @@
+{
+  "thread_id": "T-20",
+  "invoice_id": "INV-052",
+  "channel": "wa",
+  "messages": [
+    {
+      "id": "M-20-1",
+      "thread_id": "T-20",
+      "direction": "out",
+      "channel": "wa",
+      "text": "INV-052 (Rs.39,000) is 19 days overdue.",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-20-2",
+      "thread_id": "T-20",
+      "direction": "in",
+      "channel": "wa",
+      "text": "our accountant is out this week, will handle it once she's back",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-20-3",
+      "thread_id": "T-20",
+      "direction": "out",
+      "channel": "wa",
+      "text": "Understood \u2014 when is she expected back?",
+      "ts": "2026-08-28T16:00:00"
+    },
+    {
+      "id": "M-20-4",
+      "thread_id": "T-20",
+      "direction": "in",
+      "channel": "wa",
+      "text": "should be soon, not 100% sure",
+      "ts": "2026-08-29T10:00:00"
+    },
+    {
+      "id": "M-20-5",
+      "thread_id": "T-20",
+      "direction": "in",
+      "channel": "wa",
+      "text": "let's just say check with us next week",
+      "ts": "2026-08-30T13:00:00"
+    }
+  ]
+}

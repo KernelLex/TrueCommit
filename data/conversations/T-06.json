@@ -1,0 +1,39 @@
+{
+  "thread_id": "T-06",
+  "invoice_id": "INV-012",
+  "channel": "wa",
+  "messages": [
+    {
+      "id": "M-06-1",
+      "thread_id": "T-06",
+      "direction": "out",
+      "channel": "wa",
+      "text": "Following up on the Rs.54,000 you said you'd clear last week for INV-012 \u2014 we haven't received it.",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-06-2",
+      "thread_id": "T-06",
+      "direction": "in",
+      "channel": "wa",
+      "text": "sorry missed it, can I do half now and half in 2 weeks?",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-06-3",
+      "thread_id": "T-06",
+      "direction": "out",
+      "channel": "wa",
+      "text": "That works \u2014 please send the first Rs.27,000 and confirm a firm date for the balance.",
+      "ts": "2026-08-28T16:00:00"
+    },
+    {
+      "id": "M-06-4",
+      "thread_id": "T-06",
+      "direction": "in",
+      "channel": "wa",
+      "text": "sending 27000 today, rest by the 15th",
+      "ts": "2026-08-29T10:00:00"
+    }
+  ]
+}

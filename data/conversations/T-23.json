@@ -1,0 +1,39 @@
+{
+  "thread_id": "T-23",
+  "invoice_id": "INV-003",
+  "channel": "wa",
+  "messages": [
+    {
+      "id": "M-23-1",
+      "thread_id": "T-23",
+      "direction": "out",
+      "channel": "wa",
+      "text": "INV-003 (Rs.31,000) is 7 days overdue.",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-23-2",
+      "thread_id": "T-23",
+      "direction": "in",
+      "channel": "wa",
+      "text": "will clear the full 31000, just need a little more time, maybe early next week",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-23-3",
+      "thread_id": "T-23",
+      "direction": "out",
+      "channel": "wa",
+      "text": "That's fine \u2014 let us know once you have a firmer date.",
+      "ts": "2026-08-28T16:00:00"
+    },
+    {
+      "id": "M-23-4",
+      "thread_id": "T-23",
+      "direction": "in",
+      "channel": "wa",
+      "text": "will do, thanks for the patience",
+      "ts": "2026-08-29T10:00:00"
+    }
+  ]
+}

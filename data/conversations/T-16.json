@@ -1,0 +1,39 @@
+{
+  "thread_id": "T-16",
+  "invoice_id": "INV-042",
+  "channel": "wa",
+  "messages": [
+    {
+      "id": "M-16-1",
+      "thread_id": "T-16",
+      "direction": "out",
+      "channel": "wa",
+      "text": "INV-042 (Rs.1,45,000) is 17 days overdue, this is a large one \u2014 can we get an update?",
+      "ts": "2026-08-26T10:00:00"
+    },
+    {
+      "id": "M-16-2",
+      "thread_id": "T-16",
+      "direction": "in",
+      "channel": "wa",
+      "text": "cash is tight, I can send 45000 now and the remaining 100000 by month end",
+      "ts": "2026-08-27T13:00:00"
+    },
+    {
+      "id": "M-16-3",
+      "thread_id": "T-16",
+      "direction": "out",
+      "channel": "wa",
+      "text": "That works \u2014 please send the Rs.45,000 today and we'll follow up on the balance closer to month end.",
+      "ts": "2026-08-28T16:00:00"
+    },
+    {
+      "id": "M-16-4",
+      "thread_id": "T-16",
+      "direction": "in",
+      "channel": "wa",
+      "text": "sending now",
+      "ts": "2026-08-29T10:00:00"
+    }
+  ]
+}
