@@ -9,8 +9,8 @@ Kept truthful. Update whenever a check is actually re-run — don't carry forwar
 - Target commands (per README §, to be finalized Day 9): TBD, likely `make run` or equivalent two-step
 
 ## Tests
-- Test count passing: 48 / 48 (`tests/test_state_machine.py` 35, `tests/test_ledger.py` 6, `tests/test_trust.py` 7)
-- Last full `pytest` run: 2026-08-26, all green, 0.51s
+- Test count passing: 73 / 73 (`test_state_machine.py` 35, `test_ledger.py` 6, `test_trust.py` 7, `test_action_layer.py` 15, `test_perception.py` 10)
+- Last full `pytest` run: 2026-08-26, all green, ~1.1s
 
 ## Secrets hygiene
 - Grep check for `rzp_` / `sk-ant` in tracked files: not yet run (no code committed yet)
@@ -48,3 +48,4 @@ Kept truthful. Update whenever a check is actually re-run — don't carry forwar
 - 2026-08-26: `engine/schemas.py` — all 10 BUILD.md §2 contracts + InvoiceCause, smoke-tested.
 - 2026-08-26: dataset (60 invoices/12 debtors, 12 carts, 24 threads/93 messages, ground_truth.json) generated via `data/generate.py`, fully schema-validated, 100% ground-truth coverage, deterministic. `sim/clock.py` + `sim/personas.py` + `sim/run.py` written; `python -m sim.run --days 45 --seed 42` produces a 408-event deterministic, schema-valid log. Tagged `personas-frozen`.
 - 2026-08-26: judgment layer (`engine/judgment/{trust,state_machine,ledger}.py`) — zero LLM, all 8 hard bounds from master doc §3.4 enforced via `check_bounds()`, dispute-from-any-state and 1000-random-sequence termination guarantees verified. 48/48 tests passing.
+- 2026-08-26: non-LLM/non-Razorpay Day-6 action-layer slice (`engine/action/{messenger,sentinel,evidence}.py` + `razorpay_client.py` interface stubs) — 15 tests. Perception layer (`engine/perception/{client,triage,extractor,cart_cause}.py` + 5 prompt files + `eval/{triage_eval,extraction_eval}.py`) — fully built, imports cleanly, fails cleanly without a key, 10 tests. Found and fixed a real spec/environment mismatch: `claude-sonnet-4-6` + "temp 0" are both stale against the installed SDK (temperature removed entirely; structured outputs via `output_format=` is the current mechanism) — logged in DECISIONS.md, CLAUDE.md corrected. 73/73 tests passing overall.

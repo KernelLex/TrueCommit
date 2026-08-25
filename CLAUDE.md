@@ -61,7 +61,7 @@ Any deviation from the master doc or BUILD.md: what changed, why, what it costs 
 
 ## 6. WORKING CONVENTIONS
 - Python 3.11+, FastAPI, SQLite, pydantic v2; React (Vite) dashboard; pytest for everything in `judgment/`
-- LLM: Anthropic API, model `claude-sonnet-4-6`, temp 0 for perception, JSON-schema-constrained outputs; prompts live in `engine/perception/prompts/*.md`, versioned in git
+- LLM: Anthropic API, model `claude-sonnet-5` (corrected from this file's original `claude-sonnet-4-6`, which is retired — see tracking/DECISIONS.md), JSON-schema-constrained outputs via `output_format=<pydantic model>` on `client.messages.parse()` (the installed SDK removed temperature/top_p/top_k entirely — structured outputs is the current, stronger mechanism for what "temp 0 + JSON schema enforced" was asking for); prompts live in `engine/perception/prompts/*.md`, versioned in git
 - Cache perception results keyed by message_id (arms reuse them; re-runs must be instant and free)
 - Commit style: small commits, message = what + why. Tag freeze points (`personas-frozen`, `v1.0-freeze` end of Day 7)
 - Never commit secrets. `.env` is gitignored; `.env.example` has placeholders only. Grep for `rzp_` and `sk-ant` before any push.

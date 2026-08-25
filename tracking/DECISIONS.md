@@ -17,6 +17,12 @@ Scene 1 alone (B2B receivables) still covers two named track directions and can 
 
 ## Log
 
+### 2026-08-26 — LLM wiring: model id, temperature removed, structured outputs
+**What:** CLAUDE.md/BUILD.md specify model `claude-sonnet-4-6` and "temp 0, JSON schema enforced" for every perception call. Both are stale against the `anthropic` Python SDK actually installed (1.0.0): `claude-sonnet-4-6` is a retired id (current Sonnet is `claude-sonnet-5`), and `temperature`/`top_p`/`top_k` have been removed from the Messages API entirely on Sonnet 5 / Opus 5 / Fable 5 — passing any of them is a 400. In their place, the SDK ships **structured outputs**: `client.messages.parse(..., output_format=<a pydantic model>)` returns `response.parsed_output` already validated against that model's schema server-side.
+**Why this isn't a downgrade:** structured outputs is a *stronger* determinism/reliability guarantee than temp-0 sampling ever was — it's schema-validated by the API itself, not just low-entropy token sampling that could still drift off-schema. It's also a closer match to what BUILD.md was actually asking for ("JSON schema enforced") than manually parsing prose+JSON out of a temp-0 completion would have been.
+**Fix:** `engine/perception/client.py` uses `MODEL = "claude-sonnet-5"` and `call_structured()` wraps `messages.parse()` with `output_format`. CLAUDE.md §6 updated to match. Confirmed via the `claude-api` skill and by introspecting the installed SDK's `message_create_params`/`json_output_format_param` source directly (no `temperature` field exists anywhere in the installed SDK's types).
+**Cost:** none — this only affects the mechanism, not any prompt content or accuracy target. Still fully blocked on `ANTHROPIC_API_KEY` for an actual live call (Phase B).
+
 ### 2026-08-26 — data/generate.py: the L1–L5 extraction ladder definitions
 **What:** BUILD.md/master doc reference "L1–L5" levels throughout (e.g. the Acme Traders example extracts `{level: L1, amount: 40000, date: Fri, cond: null}`) but never define what distinguishes L1 from L2 from L3 etc. — that's deferred to Day-4 prompt-writing. Since the Day 1–2 dataset needs concrete per-message labels now, I fixed a 5-level ladder in `data/generate.py`:
 - L1 — firm + unconditional: explicit amount AND explicit date

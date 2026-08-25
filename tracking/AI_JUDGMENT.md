@@ -17,7 +17,7 @@ One model everywhere: **Claude Sonnet (`claude-sonnet-4-6`) via the Anthropic AP
 | 5 | Dispute summary (evidence packet one-liner) | `engine/action/evidence.py`, prompt `engine/perception/prompts/verify.md` (shared verify/summary prompt file per BUILD.md §5) | Trivial summarization for the human-handoff card | temp 0 | n/a |
 | 6 | Auditor 2nd-pass verification ("does extraction match message?") | Auditor module, Day 7 scope | The one justified 2nd LLM use — checks the extractor's work, not a new capability | temp 0, samples 10% of extractions | Quarantine rule: rolling accuracy <85% → extractor demoted, all money-adjacent actions route to human-review until it recovers |
 
-**Status as of this entry (Phase A):** none of the above are wired to a live API call yet — `ANTHROPIC_API_KEY` not yet provided. Prompt files are being written now (static content); the Python modules will exist with the call behind a thin wrapper so plugging in the key is a one-line change.
+**Status as of this entry (Phase A, updated 2026-08-26):** rows 1–3 are fully built and tested-as-far-as-possible without a key — `engine/perception/{triage,extractor,cart_cause}.py` + `engine/perception/client.py` (thin wrapper around `client.messages.parse(..., output_format=<pydantic model>)`, model `claude-sonnet-5`) + all 5 prompt files + `eval/{triage_eval,extraction_eval}.py`. Every module imports cleanly and fails with a clear `RuntimeError` (not a crash) when called without `ANTHROPIC_API_KEY` — see `tests/test_perception.py`. Rows 4–6 (drafting, dispute summary, Auditor) are not yet built. Nothing here has made a real API call yet; `ANTHROPIC_API_KEY` still not provided.
 
 ---
 
