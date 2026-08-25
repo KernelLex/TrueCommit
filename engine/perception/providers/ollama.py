@@ -24,12 +24,18 @@ CONFIG (env)
   OLLAMA_BASE_URL   default "http://localhost:11434"
   PK_OLLAMA_MODEL   default "qwen2.5:7b"
 
-The resolved model name is part of `identity()` (`"ollama:<model>"`), which
-feeds every cache fingerprint (`cache.fingerprint(self.identity(), payload)`
-in `providers/__init__.py`'s `_cached()` template method) — qwen2.5:7b and
-qwen2.5:3b therefore never share a cache entry, and re-pointing
-PK_OLLAMA_MODEL at a different tag invalidates old answers automatically
-instead of silently serving them.
+The resolved model name AND the prompt/assembly wording are both part of
+`identity()` (`"ollama:<model>:prompts@<hash>"`), which feeds every cache
+fingerprint (`cache.fingerprint(self.identity(), payload)` in
+`providers/__init__.py`'s `_cached()` template method) — qwen2.5:7b and
+qwen2.5:3b therefore never share a cache entry, re-pointing PK_OLLAMA_MODEL
+at a different tag invalidates old answers automatically, and so does editing
+`prompts/*.md` or `engine/perception/assembly.py` (see
+`assembly.prompt_fingerprint`).
+
+The user turn itself is assembled by `engine/perception/assembly.py`, shared
+with `anthropic_provider.py` — including the reference-date line every
+extraction call needs to resolve "by Friday" to a real calendar date.
 
 ROBUSTNESS (each one earned by a real behaviour observed against a live
 CPU-hosted qwen2.5, not speculative)
@@ -86,6 +92,7 @@ from typing import TypeVar
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from engine.perception import assembly
 from engine.perception.cart_cause import _CartCauseOut
 from engine.perception.client import load_prompt
 from engine.perception.extractor import _ExtractOut
@@ -210,9 +217,13 @@ class OllamaProvider(PerceptionProvider):
         the PerceptionProvider template method that wraps `_extract` etc."""
 
     def identity(self) -> str:
-        # Model id participates in the cache fingerprint: qwen2.5:7b and
-        # qwen2.5:3b must never share a cache entry.
-        return f"{self.name}:{self.model}"
+        # Model id AND prompt/assembly wording participate in the cache
+        # fingerprint: qwen2.5:7b and qwen2.5:3b must never share a cache
+        # entry, and neither may two different versions of the same prompt.
+        # (Before P7 only the model was fingerprinted, so a prompt edit
+        # silently re-served answers computed under the previous wording —
+        # which would have poisoned exactly this packet's re-measurement.)
+        return f"{self.name}:{self.model}:prompts@{assembly.prompt_fingerprint()}"
 
     def close(self) -> None:
         self._client.close()
@@ -226,11 +237,7 @@ class OllamaProvider(PerceptionProvider):
     # -- perception tasks -----------------------------------------------
 
     def _extract(self, message: Message, thread_messages: list[Message]) -> Extraction:
-        thread_text = "\n".join(f"[{m.direction}] {m.text}" for m in thread_messages)
-        user_content = (
-            f"Thread so far:\n{thread_text}\n\n"
-            f'Extract the commitment from the LAST message above: "{message.text}"'
-        )
+        user_content = assembly.extract_user_content(message, thread_messages)
         try:
             out = self._chat_json(
                 "extract", load_prompt("extract"), user_content, _EXTRACT_SCHEMA, _ExtractOut, date_field="date"
@@ -244,14 +251,7 @@ class OllamaProvider(PerceptionProvider):
         )
 
     def _triage(self, invoice: Invoice, thread_messages: list[Message]) -> InvoiceCause:
-        thread_text = "\n".join(f"[{m.direction}] {m.text}" for m in thread_messages) or "(no messages yet)"
-        user_content = (
-            f"Invoice {invoice.id}: Rs.{invoice.amount_inr:,}, status={invoice.status}, "
-            f"issued {invoice.issued}, due {invoice.due}.\n"
-            f"delivery_confirmed={invoice.delivery_confirmed}, "
-            f"payment_failed_attempt={invoice.payment_failed_attempt}.\n\n"
-            f"Thread so far:\n{thread_text}"
-        )
+        user_content = assembly.triage_user_content(invoice, thread_messages)
         try:
             out = self._chat_json("triage", load_prompt("triage"), user_content, _TRIAGE_SCHEMA, _TriageOut)
         except _OllamaUnreachable as exc:
@@ -260,10 +260,7 @@ class OllamaProvider(PerceptionProvider):
         return InvoiceCause(invoice_id=invoice.id, cause=out.cause, confidence=out.confidence, evidence=out.evidence)
 
     def _cart_cause(self, cart: Cart) -> CartCause:
-        user_content = (
-            f"Cart {cart.id}: Rs.{cart.amount_inr:,}, drop_stage={cart.drop_stage}, "
-            f"drop_signals={cart.drop_signals}, reserve_active={cart.reserve_active}."
-        )
+        user_content = assembly.cart_cause_user_content(cart)
         try:
             out = self._chat_json(
                 "cart_cause", load_prompt("cart_cause"), user_content, _CART_CAUSE_SCHEMA, _CartCauseOut

@@ -190,6 +190,96 @@ def test_cart_cause_happy_path():
 
 
 # ---------------------------------------------------------------------------
+# Reference date injection (packet P7). The bug this guards against: the user
+# turn used to carry the message text and thread with NO date at all, so a
+# model had nothing to resolve "by Friday" against — one live smoke call
+# answered 2023-10-06. See tracking/BUILD_LOG.md, 2026-08-26.
+# ---------------------------------------------------------------------------
+
+
+def _user_content(captured: list) -> str:
+    return captured[0]["messages"][1]["content"]
+
+
+def test_extract_user_content_states_todays_date():
+    captured = []
+    handler = _fixed_handler(
+        {"level": "L1", "amount_inr": 40000, "date": "2026-08-28", "condition": None, "confidence": 0.9},
+        captured=captured,
+    )
+    msg = _msg("will clear 40000 by Friday pakka")
+    _provider(handler).extract(msg, [msg])
+
+    content = _user_content(captured)
+    assert "Today is 2026-08-27 (Thursday)." in content  # derived from message.ts, never the wall clock
+    assert "YYYY-MM-DD" in content  # and the answer must come back as an ISO date
+    assert "will clear 40000 by Friday pakka" in content
+
+
+def test_extract_user_content_dates_every_thread_line():
+    """A "Friday" quoted in a five-day-old message must not read as this
+    week's Friday — so each thread line carries its own date."""
+    captured = []
+    handler = _fixed_handler(
+        {"level": "L4", "amount_inr": None, "date": None, "condition": None, "confidence": 0.6},
+        captured=captured,
+    )
+    older = _msg("chasing this again", mid="M-T-0", direction="out", ts=dt.datetime(2026, 8, 24, 9, 0))
+    msg = _msg("we're on it")
+    _provider(handler).extract(msg, [older, msg])
+
+    content = _user_content(captured)
+    assert "[out] 2026-08-24 (Monday): chasing this again" in content
+    assert "[in] 2026-08-27 (Thursday): we're on it" in content
+
+
+def test_triage_user_content_carries_issued_due_and_today():
+    captured = []
+    handler = _fixed_handler(
+        {"cause": "cashflow_delay", "confidence": 0.8, "evidence": ["engaging"]}, captured=captured
+    )
+    thread = [_msg("month end tight, will clear it")]
+    _provider(handler).triage(_invoice(), thread)
+
+    content = _user_content(captured)
+    assert "Today is 2026-08-27 (Thursday)." in content  # latest date on record for the invoice
+    assert "issued 2026-07-01 (Wednesday)" in content
+    assert "due 2026-08-01 (Saturday)" in content
+    assert "26 days past due as of today" in content
+
+
+def test_triage_with_no_thread_says_so_instead_of_inventing_a_date():
+    """An invoice nobody has contacted yet has no dated activity — and is not
+    a silent debtor (tracking/DECISIONS.md: `non_responsive` requires outreach
+    that went unanswered)."""
+    captured = []
+    handler = _fixed_handler(
+        {"cause": "cashflow_delay", "confidence": 0.45, "evidence": ["no thread"]}, captured=captured
+    )
+    _provider(handler).triage(_invoice(), [])
+
+    content = _user_content(captured)
+    assert "Today is" not in content  # nothing to anchor on — do not invent one
+    assert "no outreach has been sent" in content
+
+
+def test_both_llm_providers_assemble_the_same_user_content():
+    """The bug was duplicated inline assembly in two providers. Assert there
+    is only one copy left by checking both produce the identical user turn."""
+    from engine.perception import assembly
+
+    captured = []
+    handler = _fixed_handler(
+        {"level": "L1", "amount_inr": 40000, "date": "2026-08-28", "condition": None, "confidence": 0.9},
+        captured=captured,
+    )
+    msg = _msg("will clear 40000 by Friday pakka")
+    _provider(handler).extract(msg, [msg])
+
+    assert _user_content(captured) == assembly.extract_user_content(msg, [msg])
+
+
+# ---------------------------------------------------------------------------
 # Robustness (a): confidence normalisation — observed live: 85 instead of 0.85
 # ---------------------------------------------------------------------------
 
@@ -336,8 +426,8 @@ def test_http_error_status_does_not_fall_back():
 def test_model_name_is_part_of_identity():
     p7 = OllamaProvider(model="qwen2.5:7b", transport=httpx.MockTransport(_connect_error_handler))
     p3 = OllamaProvider(model="qwen2.5:3b", transport=httpx.MockTransport(_connect_error_handler))
-    assert p7.identity() == "ollama:qwen2.5:7b"
-    assert p3.identity() == "ollama:qwen2.5:3b"
+    assert p7.identity().startswith("ollama:qwen2.5:7b:prompts@")
+    assert p3.identity().startswith("ollama:qwen2.5:3b:prompts@")
     assert p7.identity() != p3.identity()
 
 
@@ -346,6 +436,27 @@ def test_model_name_changes_the_cache_fingerprint():
     p3 = OllamaProvider(model="qwen2.5:3b", transport=httpx.MockTransport(_connect_error_handler))
     payload = {"some": "payload"}
     assert cache.fingerprint(p7.identity(), payload) != cache.fingerprint(p3.identity(), payload)
+
+
+def test_prompt_text_is_part_of_the_cache_fingerprint(tmp_path, monkeypatch):
+    """Before P7 only the model id was fingerprinted, so editing a prompt
+    silently re-served answers computed under the previous wording — which
+    would have poisoned the re-measurement the prompt edit was made for."""
+    from engine.perception import assembly
+
+    provider = _provider(_connect_error_handler)
+    before = provider.identity()
+
+    edited = tmp_path / "prompts"
+    edited.mkdir()
+    for name in ("extract", "triage", "cart_cause"):
+        (edited / f"{name}.md").write_text("a different prompt", encoding="utf-8")
+    monkeypatch.setattr(assembly, "PROMPTS_DIR", edited)
+
+    after = provider.identity()
+    assert before != after
+    payload = {"some": "payload"}
+    assert cache.fingerprint(before, payload) != cache.fingerprint(after, payload)
 
 
 def test_different_models_do_not_share_a_cache_entry():

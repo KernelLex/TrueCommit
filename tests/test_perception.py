@@ -85,6 +85,40 @@ def test_anthropic_provider_selectable_by_env_var(monkeypatch):
         extractor.extract_promise(MSG, [MSG])
 
 
+def test_anthropic_provider_uses_the_shared_assembly_with_a_reference_date(monkeypatch):
+    """The reference-date bug lived in BOTH LLM providers because each had its
+    own copy of the user-turn assembly. Assert the Anthropic path now goes
+    through the one shared helper — no key needed, `call_structured` is stubbed
+    so nothing is ever sent."""
+    from engine.perception import assembly
+    from engine.perception.providers import anthropic_provider
+
+    seen: dict[str, str] = {}
+
+    def fake_call_structured(system_prompt, user_content, output_model):
+        seen["system"] = system_prompt
+        seen["user"] = user_content
+        return output_model(level="L1", amount_inr=1000, date=dt.date(2026, 8, 28),
+                            condition=None, confidence=0.9)
+
+    monkeypatch.setattr(anthropic_provider, "call_structured", fake_call_structured)
+    extraction = extractor.extract_promise(MSG, [MSG], provider="anthropic")
+
+    assert extraction.message_id == "M-1"
+    assert "Today is 2026-08-26 (Wednesday)." in seen["user"]  # MSG.ts, not the wall clock
+    assert seen["user"] == assembly.extract_user_content(MSG, [MSG])  # one copy, not two
+
+
+def test_anthropic_identity_includes_the_prompt_fingerprint():
+    """Prompt wording participates in the cache fingerprint, so a prompt edit
+    invalidates cached answers instead of re-serving the old wording's."""
+    from engine.perception import assembly
+
+    identity = get_provider("anthropic").identity()
+    assert identity.startswith("anthropic:")
+    assert f"prompts@{assembly.prompt_fingerprint()}" in identity
+
+
 def test_llm_output_schemas_never_carry_identifiers():
     """The LLM never assigns an invoice_id/message_id/cart_id — those come
     from the calling code (SEE/SPEAK, never SPEND — and never NAME either)."""

@@ -12,6 +12,7 @@ It stays fully blocked on `ANTHROPIC_API_KEY`: with no key,
 thing that costs money, which is exactly the point of making it a choice.
 """
 
+from engine.perception import assembly
 from engine.perception.cart_cause import _CartCauseOut
 from engine.perception.client import MODEL, call_structured, load_prompt
 from engine.perception.extractor import _ExtractOut
@@ -24,16 +25,15 @@ class AnthropicProvider(PerceptionProvider):
     name = "anthropic"
 
     def identity(self) -> str:
-        # Model id participates in the cache fingerprint: results from a
-        # different model must never be served as if they were this one's.
-        return f"{self.name}:{MODEL}"
+        # Model id AND prompt/assembly wording participate in the cache
+        # fingerprint: results from a different model — or from a different
+        # version of the prompt — must never be served as if they were this
+        # one's. (Before P7 the prompt text was NOT fingerprinted, so editing
+        # a prompt silently re-served answers computed under the old one.)
+        return f"{self.name}:{MODEL}:prompts@{assembly.prompt_fingerprint()}"
 
     def _extract(self, message: Message, thread_messages: list[Message]) -> Extraction:
-        thread_text = "\n".join(f"[{m.direction}] {m.text}" for m in thread_messages)
-        user_content = (
-            f"Thread so far:\n{thread_text}\n\n"
-            f'Extract the commitment from the LAST message above: "{message.text}"'
-        )
+        user_content = assembly.extract_user_content(message, thread_messages)
         out = call_structured(load_prompt("extract"), user_content, _ExtractOut)
         return Extraction(
             message_id=message.id, level=out.level, amount_inr=out.amount_inr,
@@ -41,24 +41,14 @@ class AnthropicProvider(PerceptionProvider):
         )
 
     def _triage(self, invoice: Invoice, thread_messages: list[Message]) -> InvoiceCause:
-        thread_text = "\n".join(f"[{m.direction}] {m.text}" for m in thread_messages) or "(no messages yet)"
-        user_content = (
-            f"Invoice {invoice.id}: Rs.{invoice.amount_inr:,}, status={invoice.status}, "
-            f"issued {invoice.issued}, due {invoice.due}.\n"
-            f"delivery_confirmed={invoice.delivery_confirmed}, "
-            f"payment_failed_attempt={invoice.payment_failed_attempt}.\n\n"
-            f"Thread so far:\n{thread_text}"
-        )
+        user_content = assembly.triage_user_content(invoice, thread_messages)
         out = call_structured(load_prompt("triage"), user_content, _TriageOut)
         return InvoiceCause(
             invoice_id=invoice.id, cause=out.cause, confidence=out.confidence, evidence=out.evidence
         )
 
     def _cart_cause(self, cart: Cart) -> CartCause:
-        user_content = (
-            f"Cart {cart.id}: Rs.{cart.amount_inr:,}, drop_stage={cart.drop_stage}, "
-            f"drop_signals={cart.drop_signals}, reserve_active={cart.reserve_active}."
-        )
+        user_content = assembly.cart_cause_user_content(cart)
         out = call_structured(load_prompt("cart_cause"), user_content, _CartCauseOut)
         return CartCause(
             cart_id=cart.id, cause=out.cause, confidence=out.confidence, evidence=out.evidence

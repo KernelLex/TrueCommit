@@ -55,7 +55,7 @@ Real bugs, dead ends, and surprises hit during the build. Every entry: date · w
 | | before | after |
 |---|---|---|
 | overall level accuracy | 77.3% (FAIL) | **88.6% (PASS, gate 85%)** |
-| date agreement | 63.6% | 68.2% |
+| date agreement | 63.6% | 70.5% |
 | amount agreement | 86.4% | 93.2% |
 | L1 P/R | 0.89 / 0.73 | 0.85 / 1.00 |
 | L2 P/R | 0.50 / 0.60 | 1.00 / 0.40 |
