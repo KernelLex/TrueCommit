@@ -65,8 +65,9 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 - **Day 8**: three-arm runner (silence / generic reminder / full system, same seed) → metrics.json, DSO/₹recovered/touches-per-recovery (Tier-0 = 0 row)/false-escalation/cost-per-₹, reproducibility-locked
 - **Day 9**: video (master doc Part 5 script) + README · **Day 10**: cleanup + submit
 
-## ⏸ PARKED (user decision 2026-08-26 — do not chase, resume only on user signal)
+## ⏸ PARKED (user decisions 2026-08-26 — resume only on user signal)
 - **Mandate flow-real enablement**: this test account lacks UPI/eMandate (account-level gate, needs business KYC the user rightly won't fabricate, or an organizer-provisioned hackathon account). Everything documented (BUILD_LOG + TRACK_BAR §0 API-real vs flow-real); harness armed (`scripts/verify_mandate_lifecycle.py`); demo + submission fully intact without it. Optional upgrade path: ask buildathon organizers for an enabled test account.
+- **P9 (human-in-the-loop queue) — COMPLETE but UNREVIEWED, parked on branch `p9-unreviewed`.** The agent finished (claims 394/394 tests: held money-actions at <0.9 confidence with click-time `check_bounds` re-run, clarify gate, approve/reject/resolve/pause API + dashboard buttons, formal-notice draft that refuses both approve AND reject, `human_resolution` as the single API-only terminal exception). Key claimed numbers: 45-day run → 4 queue items, 21 KEPT / 27 HANDOFF / 3 DISPUTED, ₹23,31,496 unattended vs ₹31,74,725 with an attentive merchant (both labeled). **Resume procedure:** lead reviews the branch diff per HANDOVER §3's checklist (re-run suite, verify the four critical claims, reproduce the 45-day numbers), then merges `p9-unreviewed` → master, updates tracking, pushes. Master remains reviewed-code-only until then.
 
 ## ⚠ OPEN RISKS
 - Local-model nondeterminism: 7b flips one message across runs (88.6% quoted as the floor, gate cleared in all observed runs) — mitigation: quote the range, cache pins demo behavior
