@@ -33,7 +33,7 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 2. Schemas before feature code ✅
 3. Personas frozen + tagged before agent work ✅
 
-### Tests: **76/76 passing** · Reproducibility: verified · Secrets: clean · Pushed: master + tag on TrueCommit
+### Tests (at Phase-A close): **76/76 passing** (now 271 — see below) · Reproducibility: verified · Secrets: clean · Pushed: master + tag on TrueCommit
 
 ---
 
@@ -48,18 +48,27 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 
 **Tests: 169/169** · Every packet reviewed by lead against the 8 design laws before merge; numbers independently reproduced.
 
-## 🔄 IN FLIGHT (group B)
-- **P2 [Opus]**: integration runner — `POST /advance` drives sim personas → real perception → real ledger/bounds → actions (opt-in real Razorpay calls land a live short_url in the audit trail). The time-warp backbone.
-- **P5 [Sonnet ∥]**: Ollama provider (shared prompts, confidence normalization, heuristic-fallback when unreachable) + **measured accuracy for qwen2.5:7b AND :3b** on both evals.
+## ✅ GROUP B + FOLLOW-UPS ALL MERGED (P2 · P5 · P7 · P8 · P6)
 
-## ⏭ NEXT
-- **P6 [Sonnet]**: `config/agents.yaml` — tunable parameters for the 5 mesh agents surfaced in System Health (after P2 merges; both touch api/)
-- Then: Day 7 auditor + TTS + `v1.0-freeze` tag → Day 8 three-arm metrics lock → Day 9 video + README → Day 10 submit
+| Packet | Tier | Key result |
+|---|---|---|
+| P2 ✅ | Opus | **The time-warp is alive**: `POST /advance` drives personas → real perception → real ledger/bounds → dispatched actions. Cross-process-deterministic 45-day world; real Razorpay payment-link + mandate-registration URLs landed in the audit trail (opt-in, rate-limited); Sentinel survived its first genuine remote failure (live 400 → retry ×3 → dead-letter → run continued) |
+| P5 ✅ | Sonnet | Ollama provider (fallback-to-heuristic when unreachable, confidence normalization, model-in-cache-fingerprint) + first out-of-sample measurement — which **caught a real bug**: the prompts never stated today's date |
+| P7 ✅ | Opus | **Extraction gate CLEARED on a free local model: qwen2.5:7b 77.3% → 88.6%** (gate 85%; lead re-ran independently, confirmed; three-run nondeterminism disclosed: 90.9/88.6/88.6, all clear). Five-level ladder preserved — no merge fallback needed. A triage change that traded the gated metric for an ungated headline was measured and **reverted** |
+| P8 ✅ | Opus | **Compliance made true**: touch cap now per-DEBTOR as the law says (worst window 6→2); gentle nudges are real bounds-checked Actions; sim clock day-0 bug fixed. Honest cost: 45-day recovery 58.2% → **36.6%** — the compliant number is the number |
+| P6 ✅ | Sonnet | `config/agents.yaml` — sentinel + cache knobs genuinely wired (test-proven), bounds structurally un-overridable (`extra="forbid"`), System Health shows live provider/model/degradations/dead-letters/cache counters |
+
+**Tests: 271/271** · Every packet lead-reviewed against the 8 laws; every headline number independently reproduced before merge.
+
+## ⏭ NEXT (Day 7 → 10)
+- **Day 7 batch**: Auditor (10% verification sampling on Ollama + rolling accuracy + <85% quarantine → review queue) · instrument-over-nudge touch-budget priority (lead-ruled: master doc's own recovery hierarchy applied to the scarce per-debtor budget, before/after reported) · Hinglish TTS voice note · dashboard funnel-movement polish + cold-start 2-command path → **tag `v1.0-freeze`** (Sep 1)
+- **Day 8**: three-arm runner (silence / generic reminder / full system, same seed) → metrics.json, DSO/₹recovered/touches-per-recovery (Tier-0 = 0 row)/false-escalation/cost-per-₹, reproducibility-locked
+- **Day 9**: video (master doc Part 5 script) + README · **Day 10**: cleanup + submit
 
 ## ⚠ OPEN RISKS
-- Local-LLM (qwen) accuracy vs the gates — being **measured right now**, not guessed. Early live probe: 7b nails levels (incl. the hard L3 partial-payment case) but can scramble which number goes in which JSON field — P5's normalization + the per-provider accuracy table exist for exactly this, and the design law means a scrambled field can never touch money
-- Mandate execute/revoke realness — needs the one manual registration authorization during demo prep (path documented in the client docstring)
-- Dashboard funnel movement depends on P2 landing
+- Local-model nondeterminism: 7b flips one message across runs (88.6% quoted as the floor, gate cleared in all observed runs) — mitigation: quote the range, cache pins demo behavior
+- Mandate execute/revoke realness — one manual registration authorization during demo prep (path documented in the client docstring)
+- qwen2.5:3b remains below gate (70.5%) — 7b is the demo model; 3b stays as the honest comparison row
 
 ## 🎬 SANDBOX DEMO RUN (2026-08-26, from a clean worktree at commit 85ee9d0 — reproducible by anyone)
 All eight beats executed live against the merged code; every number below was produced during the run, not quoted from memory:
@@ -76,7 +85,7 @@ All eight beats executed live against the merged code; every number below was pr
 
 ## How to run what exists today
 ```
-./.venv/Scripts/python.exe -m pytest tests/ -q          # 76 tests
+./.venv/Scripts/python.exe -m pytest tests/ -q          # 271 tests
 ./.venv/Scripts/python.exe -m sim.run --days 45 --seed 42   # deterministic world
 ./.venv/Scripts/python.exe -m uvicorn api.main:app          # API on :8000
 ./.venv/Scripts/python.exe -m scripts.verify_razorpay_sandbox  # live sandbox probes (needs .env keys)
