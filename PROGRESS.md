@@ -35,25 +35,29 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 
 ---
 
-## 🔄 IN FLIGHT (batch 1 — three-tier build: Fable lead / Opus hard / Sonnet routine)
+## ✅ BATCH 1 MERGED (three-tier build: Fable lead / Opus hard / Sonnet routine)
 
-| Packet | Tier | What | Live demo it produces |
+| Packet | Tier | Shipped | Key result |
 |---|---|---|---|
-| P1 | Opus | Provider-pluggable perception (heuristic rules provider free+offline TODAY, ollama/anthropic slots, oracle demo-mode) + per-provider eval harness | Run the extraction eval live, real accuracy table, zero cost |
-| P3 | Sonnet ∥ | Real Razorpay client for every sandbox-verified endpoint; execute/revoke simulated+labeled | Live mandate-registration short_url lands in the audit trail |
-| P4 | Sonnet ∥ | Dashboard v1: funnel, entity audit timeline, Beta trust curves, review queue, system health, time-warp buttons | The money-moves-on-screen beat |
-| — | env | Ollama installing + qwen2.5:7b & :3b pulling (local LLM, free, works hosted via `OLLAMA_BASE_URL`) | Perception on a real local model |
+| P1 ✅ | Opus | Provider-pluggable perception: `heuristic` (free/offline, tunable `HeuristicParams`) / `anthropic` / `oracle` (demo-only, evals refuse it) + file cache + per-provider evals | **Extraction 97.7% PASS** (in-sample caveat carried); **triage 91.7% PASS on threaded invoices** (gate scoped by lead ruling — 36 thread-less fillers proven at a 61.1% info ceiling, nothing tuned); 2 real contradictions found + resolved |
+| P3 ✅ | Sonnet | Real Razorpay TEST client: payment links / invoices / customers / **mandate registration links (UPI + eMandate)**; execute/revoke labeled `simulated:true` | Live smoke made real short_urls: payment link `rzp.io/rzp/Ux0hpma`, UPI mandate registration `rzp.io/rzp/yP4UiEA` |
+| P4 ✅ | Sonnet | Dashboard v1: Funnel (Tier-2 badge), Entity audit Timeline, SVG Beta Trust Curves, Review Queue, System Health (bounds card), time-warp buttons | All five screens live against the API; zero invented numbers (grep-verified); graceful 404 toast until `/advance` exists |
+| env ✅ | — | Ollama v0.32.15 + qwen2.5:7b & :3b installed and smoke-tested | Structured-output extraction answered correctly in ~3s on CPU |
 
-## ⏭ NEXT (approved, queued behind batch 1)
-- **P2 [Opus]**: integration runner — sim clock → perception (cached) → ledger → real actions, driven by `POST /advance` (the time-warp backbone)
-- **P6 [Sonnet]**: `config/agents.yaml` — tunable parameters for all 5 mesh agents surfaced in System Health
-- **P5 [Sonnet]**: Ollama provider (dispatches when the model pulls finish)
-- Then: Day 7 auditor + TTS + freeze tag → Day 8 three-arm metrics lock → Day 9 video + README → Day 10 submit
+**Tests: 169/169** · Every packet reviewed by lead against the 8 design laws before merge; numbers independently reproduced.
+
+## 🔄 IN FLIGHT (group B)
+- **P2 [Opus]**: integration runner — `POST /advance` drives sim personas → real perception → real ledger/bounds → actions (opt-in real Razorpay calls land a live short_url in the audit trail). The time-warp backbone.
+- **P5 [Sonnet ∥]**: Ollama provider (shared prompts, confidence normalization, heuristic-fallback when unreachable) + **measured accuracy for qwen2.5:7b AND :3b** on both evals.
+
+## ⏭ NEXT
+- **P6 [Sonnet]**: `config/agents.yaml` — tunable parameters for the 5 mesh agents surfaced in System Health (after P2 merges; both touch api/)
+- Then: Day 7 auditor + TTS + `v1.0-freeze` tag → Day 8 three-arm metrics lock → Day 9 video + README → Day 10 submit
 
 ## ⚠ OPEN RISKS
-- Heuristic/local-LLM extraction accuracy vs the 85% gate — will be **measured, not guessed**; BUILD.md's level-merge fallback documented if low
-- Mandate execute/revoke realness — needs the one manual registration authorization during demo prep
-- Dashboard funnel shows real movement only after P2 lands (states are mostly NEW until the integration runner drives them)
+- Local-LLM (qwen) accuracy vs the gates — being **measured right now**, not guessed
+- Mandate execute/revoke realness — needs the one manual registration authorization during demo prep (path documented in the client docstring)
+- Dashboard funnel movement depends on P2 landing
 
 ---
 
