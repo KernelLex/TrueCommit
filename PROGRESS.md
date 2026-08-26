@@ -86,6 +86,9 @@ User ask: press "next day" and SEE it in the UI — real conversation text, guar
 
 **Real bug the new visibility caught (not fixed here, deliberately — money-adjacent, needs its own review):** `Sentinel.mark_link_opened()` is fully built and tested but has zero call sites in the runner — every dispatched link/mandate times out as a "soft refusal" after 48h regardless of what actually happened, including mandates the debtor already confirmed. Confirmed via grep before merge. **P11 dispatched immediately after to fix it** (see below).
 
+## ⏸ PAUSED BY USER (2026-08-26) — "before going to a new phase you need to talk to me"
+P11 keeps running unattended (no clean mid-task stop). Lead will NOT review, merge, touch files, or start any new phase/packet until the user has been talked to and gives the go-ahead. If P11 completes while paused: park its result unreviewed (same as the P9 precedent), record it here, and wait — do not merge, do not dispatch anything further.
+
 ## 🔄 IN FLIGHT — P11: fix the silent link-open tracking gap
 Opus, correctness-critical (touches money-adjacent trust/bounds inputs). Wires `mark_link_opened()` into the runner at the moment a debtor replies to a tracked instrument, without weakening genuine 48h-silence handling. Required to measure honestly, not tune: re-run the full 45-day distribution before/after, report both, whatever the corrected simulation produces is the number (recovery is expected to rise — fewer entities wrongly barred from future mandate offers — but P11 must report the real result either way).
 
