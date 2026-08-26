@@ -57,6 +57,22 @@ THE FOUR RULES THIS FILE OBEYS (and how)
    the same `advance()` sequence produce byte-identical audit trails; there is
    a test for it.
 
+WHAT "THE DEBTOR OPENED THE LINK" MEANS IN A TEXT-ONLY SIMULATION
+-----------------------------------------------------------------
+The Sentinel refuses to assume a link landed: `track_link_sent` starts a 48h
+window and `link_timed_out()` turns a window that closed in silence into a soft
+refusal. That is correct, and it is untouched. What was missing (packet P10's
+finding, fixed in P11) is the OTHER half — the signal that closes the window
+happily. There is no click-tracking pixel in a text-based world, so the runner
+uses the only open signal it actually has: **a reply on the thread**. Any
+inbound message from the debtor, whatever it says, means the message reached a
+human who acted on it, so `_inbound` marks every instrument still inside its
+window as opened (`sentinel.mark_link_opened`). Only genuine multi-day silence
+— a persona move that sends nothing back at all (`silence`, the mandate
+table's `ignore`) — still reaches the 48h timeout and still soft-refuses.
+See tracking/DECISIONS.md (2026-08-26, packet P11) for why the rule is "any
+reply" rather than "a reply that sounds like a yes".
+
 REAL RAZORPAY IS OPT-IN AND RATE-LIMITED BY DESIGN
 --------------------------------------------------
 Default (env unset): zero network calls, so the test suite stays offline and
@@ -245,6 +261,12 @@ class WorldRunner:
         self._schedule: dict[int, list[tuple[str, str, dict]]] = {}
         self._pending_promise: dict[str, int] = {}   # entity_id -> promise token
         self._mandate_pending: set[str] = set()
+        self._open_instruments: dict[str, list[tuple[str, str]]] = {}
+        """entity_id -> [(action_id, kind)] for every link/mandate_offer that has
+        been dispatched, tracked by the Sentinel, and NOT yet resolved — i.e. the
+        debtor has neither replied (open) nor let the 48h window close (timeout).
+        The exact `action_id` `track_link_sent` was called with, so
+        `mark_link_opened` cancels the right timer and not a look-alike."""
         self._promise_token = 0
         self._event_seq = 0
         self._audit_seq = 0
@@ -547,6 +569,12 @@ class WorldRunner:
 
     def _resolve_link_timeout(self, day: int, entity_id: str, data: dict) -> None:
         action_id = data["action_id"]
+        # This beat IS the end of the window, whichever way it goes: either the
+        # debtor already replied (marked opened, `link_timed_out` is False) or
+        # the 48h ran out. Either way the instrument stops being "outstanding",
+        # so a reply that arrives NEXT week can never retro-cancel a timeout
+        # that already fired.
+        self._forget_instrument(entity_id, action_id)
         if not self.sentinel.link_timed_out(action_id, self._ts(day)):
             return
         self._audit(
@@ -560,6 +588,49 @@ class WorldRunner:
         if entity is None or entity.state in TERMINAL_STATES:
             return
         self._emit("mandate_refused", entity_id, {"reason": "mandate link never opened (soft refusal)"}, day)
+
+    # -- link-open tracking: the half the Sentinel could never see ------------
+
+    def _mark_instruments_opened(self, entity_id: str, message: Message, day: int) -> None:
+        """A reply on the thread IS the open signal (packet P11).
+
+        `Sentinel.mark_link_opened()` was built and unit-tested in the Day-6
+        action layer and then had ZERO call sites here, so `link_timed_out()`
+        was true for every instrument ever sent and every dispatched
+        mandate offer soft-refused itself 48 virtual hours later — including
+        ones the debtor had explicitly confirmed (INV-001/Acme Traders, packet
+        P10's finding). This is that missing call site.
+
+        The rule is deliberately "the debtor sent ANY message back", not "the
+        debtor said yes": in a text-only simulation there is no click event, and
+        a human who types a reply to a message carrying a payment link has
+        demonstrably received and read it. Whether they then agree is a separate
+        question the ledger already answers from the extraction and the persona
+        move — conflating the two here would let the Sentinel's delivery signal
+        second-guess a judgment-layer decision. True silence (no reply at all)
+        still reaches `_resolve_link_timeout` and still soft-refuses, which is
+        the behaviour bound #7 was designed around.
+        """
+        for action_id, kind in self._open_instruments.pop(entity_id, []):
+            self.sentinel.mark_link_opened(action_id)
+            self._audit(
+                entity_id, "sentinel",
+                f"{kind} link marked opened: the debtor replied inside the "
+                f"{LINK_TIMEOUT_DAYS * 24}h window",
+                {"action_id": action_id, "kind": kind, "thread_message_id": message.id}, day,
+            )
+
+    def _forget_instrument(self, entity_id: str, action_id: str) -> None:
+        """Drop one instrument from the outstanding set without touching the
+        Sentinel's own records — `link_sent_at` / `link_opened` stay exactly as
+        they were, so the Sentinel remains the single source of truth about what
+        happened to a link and this dict is only the runner's index of which
+        windows are still open."""
+        remaining = [item for item in self._open_instruments.get(entity_id, []) if item[0] != action_id]
+        if remaining:
+            self._open_instruments[entity_id] = remaining
+        else:
+            self._open_instruments.pop(entity_id, None)
 
     # -- Scene 2: carts ------------------------------------------------------
 
@@ -661,6 +732,11 @@ class WorldRunner:
             text = self._instrument_text(action, detail)
             self._send(action, text, day, extra=detail)
             self.sentinel.track_link_sent(action.id, now)
+            # The instrument is now inside its 48h window: a reply closes it as
+            # opened (`_mark_instruments_opened`), silence closes it as a soft
+            # refusal (`_resolve_link_timeout`). Both paths go through the same
+            # (action_id, kind) pair recorded here.
+            self._open_instruments.setdefault(entity_id, []).append((action.id, kind))
             self._schedule_at(day + LINK_TIMEOUT_DAYS, "link_timeout", entity_id,
                               {"action_id": action.id, "kind": kind})
         elif kind == "message":
@@ -814,9 +890,15 @@ class WorldRunner:
     # -- perception + threads -----------------------------------------------
 
     def _inbound(self, entity_id: str, text: str, day: int) -> Extraction:
-        """Append a debtor message and run it through the REAL extractor."""
+        """Append a debtor message and run it through the REAL extractor.
+
+        This is the single funnel every debtor message passes through, which is
+        why the link-open signal is taken here and not in each persona branch:
+        a branch added later cannot forget to report that the debtor engaged.
+        """
         channel = self.channel_of.get(entity_id, "wa")
         message = self._append_thread(entity_id, "in", channel, text, day)
+        self._mark_instruments_opened(entity_id, message, day)
         thread = self._thread(entity_id)
         extraction = self.provider.extract(message, thread)
         self.extractions.append(extraction)

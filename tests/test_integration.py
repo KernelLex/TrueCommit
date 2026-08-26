@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from api.main import app
 from engine.action import razorpay_client
-from engine.integration.runner import FINAL_SWEEP_DAY, WorldRunner
+from engine.integration.runner import FINAL_SWEEP_DAY, LINK_TIMEOUT_DAYS, WorldRunner
 from engine.judgment.state_machine import (
     MAX_TOUCHES_PER_WEEK,
     TERMINAL_STATES,
@@ -57,6 +57,39 @@ def test_advance_45_days_drives_the_batch_to_terminal_states(world: WorldRunner)
     assert len(kept) > 0, "no invoice was recovered — the happy path is broken"
     assert len(handed_over) > 0, "nothing reached a human — the stopping rules never fired"
     assert world.funnel_summary()["recovered_inr"] > 0
+
+
+def test_the_45_day_distribution_is_the_number_the_docs_quote(world: WorldRunner):
+    """The headline figure, pinned so it cannot move without a doc update.
+
+    Every packet that has changed this number recorded the change openly
+    (P8's per-debtor touch cap, P9's money gate); packet P11 is the first that
+    changed the *audit trail* without moving the headline, and that too is a
+    measured result rather than an assumption — see tracking/BUILD_LOG.md
+    2026-08-26 (P11) for why fixing 9 false refusals recovered ₹0 more.
+    If this test fails, the number in BUILD_QUALITY.md / TRACK_BAR.md /
+    DECISIONS.md is now a lie and has to be re-measured, not re-asserted.
+    """
+    states = _invoice_states(world)
+    distribution: dict[str, int] = {}
+    for state in states.values():
+        distribution[state] = distribution.get(state, 0) + 1
+
+    assert distribution == {"KEPT": 21, "HUMAN_HANDOFF": 27, "DISPUTED": 3}
+
+    summary = world.funnel_summary()
+    assert summary["recovered_inr"] == 2_331_496
+    active_value = sum(
+        world.ledger.entities[eid].invoice_amount_inr for eid in world.active_invoice_ids
+    )
+    assert active_value == 6_971_068
+    assert round(100 * summary["recovered_inr"] / active_value, 1) == 33.4
+
+    assert summary["promises"] == {"broken": 14, "kept": 18, "pending": 6}
+    assert summary["messages_sent"] == 100
+    assert summary["held_actions_total"] == 4
+    assert summary["dead_letter"] == 0
+    assert world.bound_violations() == []
 
 
 def test_advance_moves_money_promises_and_trust(world: WorldRunner):
@@ -270,6 +303,176 @@ def test_link_timeouts_are_treated_as_soft_refusals(world: WorldRunner):
     assert timeouts, "no link ever timed out — the sentinel path is untested by this run"
     refusals = {e.entity_id for e in world.events if e.type == "mandate_refused"}
     assert refusals & {a.entity_id for a in timeouts}
+
+
+# ---------------------------------------------------------------------------
+# (c2) the link-open signal (packet P11) — the fix for P10's smoking gun
+#
+# `Sentinel.mark_link_opened()` shipped in the Day-6 action layer, was unit
+# tested in tests/test_action_layer.py, and then had ZERO call sites in the
+# runner. `link_timed_out()` was therefore true for EVERY instrument ever
+# sent, so every dispatched mandate offer soft-refused itself two virtual days
+# later regardless of what the debtor had actually done. The tests below pin
+# both halves of the corrected behaviour: a reply cancels the window, and
+# genuine silence still does not.
+# ---------------------------------------------------------------------------
+
+
+def _instrument_dispatches(world: WorldRunner, entity_id: str) -> list:
+    return [
+        a for a in world.ledger.audit
+        if a.entity_id == entity_id and a.layer == "action"
+        and a.summary.startswith(("mandate_offer dispatched", "link dispatched"))
+    ]
+
+
+def _opened(world: WorldRunner, entity_id: str) -> list:
+    return [
+        a for a in world.ledger.audit
+        if a.entity_id == entity_id and a.layer == "sentinel" and "marked opened" in a.summary
+    ]
+
+
+def test_a_confirmed_mandate_is_never_later_recorded_as_refused(world: WorldRunner):
+    """P10's smoking gun, INV-001 / Acme Traders, told as the trail tells it.
+
+    BEFORE this fix the run read: day 7 mandate offered -> persona move
+    `confirm_mandate` -> `mandate_confirmed` -> **day 9 "link never opened
+    within 48h — treating as soft refusal" -> `mandate_refused: MANDATED ->
+    LINKED`**. The debtor said yes and the system recorded a refusal two days
+    later, set `entity.mandate_refused` (bound #7: no re-offer, ever) and fed
+    `trust.update_refusal`.
+    """
+    entity_id = "INV-001"
+
+    offered = _instrument_dispatches(world, entity_id)
+    assert len(offered) == 1 and offered[0].summary.startswith("mandate_offer dispatched")
+    action_id = offered[0].detail["action_id"]
+
+    confirmed = [
+        a for a in world.ledger.audit
+        if a.entity_id == entity_id and a.detail.get("move") == "confirm_mandate"
+    ]
+    assert confirmed, "INV-001 is only the smoking gun because the debtor CONFIRMED"
+
+    # the reply is what closed the window, and it closed THIS action's window
+    opened = _opened(world, entity_id)
+    assert len(opened) == 1
+    assert opened[0].detail["action_id"] == action_id
+    assert opened[0].ts >= offered[0].ts, "an instrument was opened before it was sent"
+    assert world.sentinel.link_timed_out(action_id, world.now()) is False
+
+    # ...so none of the four consequences of the bug happen any more
+    assert not [a for a in world.ledger.audit
+                if a.entity_id == entity_id and "soft refusal" in a.summary]
+    assert not [e for e in world.events
+                if e.entity_id == entity_id and e.type == "mandate_refused"]
+    assert world.ledger.entities[entity_id].mandate_refused is False
+    assert not [a for a in world.ledger.audit
+                if a.entity_id == entity_id and a.summary == "mandate_refused: MANDATED -> LINKED"]
+
+    # ...and the mandate proceeds to execute, straight out of MANDATED
+    assert "mandate_execute_success: MANDATED -> KEPT" in {
+        a.summary for a in world.ledger.audit if a.entity_id == entity_id
+    }
+    assert world.ledger.entities[entity_id].state == "KEPT"
+
+
+def test_any_reply_opens_every_instrument_still_inside_its_window(world: WorldRunner):
+    """The rule is "the debtor sent ANY message back", not "the debtor agreed" —
+    there is no click event in a text-only world, so a reply IS the open signal
+    (tracking/DECISIONS.md, packet P11). Asserted over the whole run rather than
+    on one entity: every instrument whose debtor replied inside the window is
+    marked opened, against the exact `action_id` `track_link_sent` was called
+    with, and never before the send itself.
+    """
+    opened = [a for a in world.ledger.audit
+              if a.layer == "sentinel" and "marked opened" in a.summary]
+    assert opened, "no instrument was ever marked opened — the call site is gone again"
+
+    opened_ids = {a.detail["action_id"] for a in opened}
+    assert opened_ids <= set(world.sentinel.link_sent_at), "opened an id the sentinel never tracked"
+    assert opened_ids == world.sentinel.link_opened
+    assert len(opened_ids) == len(opened), "one instrument was marked opened twice"
+
+    sent_at = {a.detail["action_id"]: a.ts for a in world.ledger.audit
+               if a.layer == "action" and "action_id" in a.detail
+               and a.summary.startswith(("mandate_offer dispatched", "link dispatched"))}
+    for entry in opened:
+        assert entry.ts >= sent_at[entry.detail["action_id"]]
+        assert entry.detail["kind"] in ("link", "mandate_offer")
+
+    # every debtor who confirmed a mandate had their offer opened, and none of
+    # them is flagged as having refused one
+    confirmers = {a.entity_id for a in world.ledger.audit
+                  if a.detail.get("move") == "confirm_mandate"}
+    assert len(confirmers) > 1
+    assert confirmers <= {a.entity_id for a in opened}
+    assert not [e for e in confirmers if world.ledger.entities[e].mandate_refused]
+
+
+def test_true_silence_still_soft_refuses_after_48h(world: WorldRunner):
+    """The half of `link_timed_out()` that was ALWAYS right, and must stay right:
+    a debtor who sends nothing back is a soft refusal at 48h. INV-003 is the run's
+    own instance — day 21 mandate offered, persona move `ignore` (which sends no
+    message at all), day 23 soft refusal -> `mandate_refused: MANDATED -> LINKED`.
+    """
+    entity_id = "INV-003"
+
+    offered = _instrument_dispatches(world, entity_id)
+    assert len(offered) == 1
+    action_id = offered[0].detail["action_id"]
+
+    assert [a for a in world.ledger.audit
+            if a.entity_id == entity_id and a.detail.get("move") == "ignore"]
+    assert _opened(world, entity_id) == [], "silence must never be read as an open"
+
+    # No inbound message AFTER the offer went out and before the window closed.
+    # Ordered by position in the thread, not by timestamp: `_ts()` is day-granular
+    # on purpose, so the promise that EARNED this offer shares a timestamp with
+    # it and only the trail says which came first. `thread_message_id` (packet
+    # P10) is what makes that resolvable at all.
+    timeout = next(a for a in world.ledger.audit
+                   if a.entity_id == entity_id and "soft refusal" in a.summary)
+    assert timeout.detail["action_id"] == action_id
+    assert (timeout.ts - offered[0].ts).days == LINK_TIMEOUT_DAYS
+
+    thread = world.threads[entity_id]
+    sent_at = next(i for i, m in enumerate(thread)
+                   if m.id == offered[0].detail["thread_message_id"])
+    assert [m for m in thread[sent_at + 1:] if m.direction == "in" and m.ts <= timeout.ts] == []
+
+    # the sentinel's own verdict is unchanged, and the ladder acted on it
+    assert world.sentinel.link_timed_out(action_id, timeout.ts) is True
+    assert [e.payload["reason"] for e in world.events
+            if e.entity_id == entity_id and e.type == "mandate_refused"] == [
+        "mandate link never opened (soft refusal)"
+    ]
+    assert world.ledger.entities[entity_id].mandate_refused is True
+
+
+def test_the_only_refusals_left_are_ones_a_debtor_actually_made(world: WorldRunner):
+    """The measured blast radius of the bug, pinned as a number. Before the fix a
+    45-day run produced 13 `mandate_refused` events, 10 of them manufactured by
+    the timeout — barring 10 entities from any future mandate offer (bound #7)
+    when only 4 had earned it. After it: 3 explicit debtor refusals
+    (`refuse_but_promise`) + 1 genuine 48h silence."""
+    refusals = [e for e in world.events if e.type == "mandate_refused"]
+    by_reason: dict[str, int] = {}
+    for event in refusals:
+        by_reason[event.payload["reason"]] = by_reason.get(event.payload["reason"], 0) + 1
+
+    assert by_reason == {
+        "debtor declined auto-debit": 3,
+        "mandate link never opened (soft refusal)": 1,
+    }
+    barred = sorted(eid for eid, e in world.ledger.entities.items() if e.mandate_refused)
+    assert barred == ["INV-002", "INV-003", "INV-007", "INV-011"]
+
+    # ...and every one of them traces to a real debtor move in the trail
+    moves = {a.entity_id: a.detail["move"] for a in world.ledger.audit
+             if a.summary.startswith("debtor mandate move:")}
+    assert {moves[eid] for eid in barred} == {"refuse_but_promise", "ignore"}
 
 
 def test_termination_sweep_only_fires_after_the_touch_schedule_is_done(world: WorldRunner):
