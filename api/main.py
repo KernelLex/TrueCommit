@@ -18,11 +18,12 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from engine import config as agent_config
-from engine.action import razorpay_client, tts
+from engine.action import razorpay_client, telegram_bot, telephony, tts
 from engine.action.contacts import ContactError
 from engine.action.evidence import render_card
 from engine.action.razorpay_client import RazorpayError
@@ -564,8 +565,49 @@ def list_contacts() -> list[dict]:
             "contact_name": resolved["name"],
             "contact_phone": resolved["contact"],
             "contact_source": resolved["source"],
+            "telegram_chat_id": resolved["telegram_chat_id"],
         })
     return rows
+
+
+class TelegramLinkIn(BaseModel):
+    chat_id: str
+
+
+@app.get("/telegram/updates")
+def telegram_updates() -> dict:
+    """Read the bot's own inbox (packet P17) so an operator can find the real
+    `chat_id` of whoever just messaged it — the one-time opt-in Telegram
+    requires before the bot can message someone back. Read-only, decides
+    nothing; returns a clean empty list (not an error) when no bot token is
+    configured, since this is a discovery convenience, not a required route.
+    """
+    if not telegram_bot.is_configured():
+        return {"configured": False, "chats": []}
+    try:
+        chats = telegram_bot.get_recent_chats()
+    except telegram_bot.TelegramError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"configured": True, "chats": chats}
+
+
+@app.post("/entities/{entity_id}/contact/telegram")
+def link_telegram(entity_id: str, body: TelegramLinkIn) -> dict:
+    """Attach a discovered Telegram `chat_id` to the contact already on file
+    for this entity's debtor (packet P17). Additive to name/phone, never a
+    substitute for them — 422 if no contact was ever submitted for this
+    entity yet (submit name/phone first via `POST /entities/{id}/contact`)."""
+    key = runner._contact_key(entity_id)
+    try:
+        contact = runner.contacts.link_telegram(key, body.chat_id, runner.now())
+    except ContactError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    runner.audit_manual(
+        entity_id, "operator linked a real Telegram chat to this contact",
+        {"contact_key": key, "chat_id": body.chat_id},
+    )
+    return {"entity_id": entity_id, "contact_key": key, "contact": json.loads(contact.model_dump_json())}
 
 
 # ---------------------------------------------------------------------------
@@ -653,8 +695,39 @@ def _manual_message_rows(entity_id: str) -> list[dict]:
             "contact_source": detail.get("contact_source"),
             "rail": detail.get("rail"),
             "delivery_channel": detail.get("channel"),
+            "whatsapp_status": detail.get("whatsapp_status"),
+            "whatsapp_sid": detail.get("whatsapp_sid"),
+            "telegram_status": detail.get("telegram_status"),
+            "telegram_message_id": detail.get("telegram_message_id"),
         })
     return rows
+
+
+@app.api_route("/telephony/twiml", methods=["GET", "POST"])
+def telephony_twiml(text: str) -> Response:
+    """The webhook Twilio's real Voice API fetches TwiML from (packet P16
+    follow-up, 2026-08-27). Twilio TRIAL accounts reject inline `twiml=` on
+    `Calls.create()` outright ("Invalid or disallowed parameters... trial
+    accounts have limited parameter access" — confirmed live, see
+    tracking/BUILD_LOG.md); only a `url=` Twilio can fetch from is accepted.
+    `engine.action.telephony.place_call()` builds that URL as
+    `{PUBLIC_BASE_URL}/telephony/twiml?text=<the reminder text>` — `text` is
+    already fully decided by the time it reaches here (the ledger's template
+    or an operator's own words); this route speaks it verbatim via Twilio's
+    own `<Say>`, choosing no content of its own (CLAUDE.md law 1). Public by
+    necessity (Twilio's servers must reach it, not just this backend's own
+    caller) but read-only and stateless — it decides nothing and writes
+    nothing to the ledger or audit trail.
+    """
+    twiml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f'<Response><Say voice="Polly.Aditi" language="hi-IN">{telephony._escape_xml(text)}</Say></Response>'
+    )
+    # Twilio's webhook fetcher specifically wants `text/xml` -
+    # `application/xml` (also technically valid XML) was silently rejected as
+    # unparseable in live testing (2026-08-27, tracking/BUILD_LOG.md), and
+    # every official Twilio TwiML example uses this exact value.
+    return Response(content=twiml, media_type="text/xml")
 
 
 @app.post("/entities/{entity_id}/remind-now")

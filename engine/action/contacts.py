@@ -56,6 +56,13 @@ class Contact(BaseModel):
     phone: str
     submitted_at: dt.datetime
     source: Literal["operator_submitted"] = "operator_submitted"
+    telegram_chat_id: str | None = None
+    """Optional (packet P17). Telegram addresses a `chat_id`, not a phone
+    number — a debtor must message the bot once before it can reach them
+    (`engine.action.telegram_bot.get_recent_chats()` discovers this after
+    that opt-in). `None` means no Telegram opt-in has happened yet for this
+    contact; the name/phone half of a Contact is independent of it and can
+    exist without it, same as it always could."""
 
 
 class ContactBook:
@@ -82,9 +89,26 @@ class ContactBook:
                 "(expected an optional '+' then 8-15 digits, no leading zero)"
             )
 
-        contact = Contact(name=clean_name, phone=clean_phone, submitted_at=now)
+        existing = self._contacts.get(key)
+        contact = Contact(
+            name=clean_name, phone=clean_phone, submitted_at=now,
+            telegram_chat_id=existing.telegram_chat_id if existing else None,
+        )
         self._contacts[key] = contact
         return contact
+
+    def link_telegram(self, key: str, chat_id: str, now: dt.datetime) -> Contact:
+        """Attach a discovered Telegram `chat_id` to whatever contact already
+        exists for `key`, WITHOUT touching name/phone (packet P17). Raises
+        `ContactError` if no name/phone was ever submitted for this key —
+        Telegram linking is additive to an existing real contact, not a way
+        to create one with no name attached."""
+        existing = self._contacts.get(key)
+        if existing is None:
+            raise ContactError(f"no contact on file for {key!r} yet - submit name/phone first")
+        updated = existing.model_copy(update={"telegram_chat_id": chat_id, "submitted_at": now})
+        self._contacts[key] = updated
+        return updated
 
     def get(self, key: str) -> Contact | None:
         return self._contacts.get(key)

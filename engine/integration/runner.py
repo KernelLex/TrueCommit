@@ -115,7 +115,7 @@ from engine.action.evidence import build_evidence_packet
 from engine.action.messenger import Messenger, Rail
 from engine.action.razorpay_client import RazorpayError
 from engine.action.sentinel import MAX_RETRIES, Sentinel
-from engine.action import tts
+from engine.action import telegram_bot, telephony, tts
 from engine.judgment.ledger import Ledger
 from engine.judgment.state_machine import MAX_TOUCHES_PER_WEEK, TERMINAL_STATES, TOUCH_WINDOW_DAYS
 from engine.perception.providers import get_provider
@@ -292,6 +292,33 @@ def _real_tts_enabled() -> bool:
     return os.environ.get(ENV_REAL_TTS, "").strip().lower() not in {"0", "false", "no", "off"}
 
 
+ENV_REAL_TELEPHONY = "PK_REAL_TELEPHONY"
+
+
+def _real_telephony_enabled() -> bool:
+    """OPT-IN (packet P16), unlike `PK_REAL_TTS`'s opt-out — and unlike that
+    flag, the asymmetry here is not about cost, it is about who is affected.
+    Generating a local gTTS MP3 has no effect on anyone; actually ringing a
+    phone or messaging a real WhatsApp account is a real-world side effect on
+    a real human being, so it needs an explicit ask even when a Twilio
+    credential exists in `.env`. See `WorldRunner._should_go_real_telephony`
+    for the other three conditions this flag is only one of."""
+    return os.environ.get(ENV_REAL_TELEPHONY, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+ENV_REAL_TELEGRAM = "PK_REAL_TELEGRAM"
+
+
+def _real_telegram_enabled() -> bool:
+    """OPT-IN (packet P17), same reasoning as `PK_REAL_TELEPHONY`: a real
+    Telegram send genuinely reaches a real person, so it needs an explicit ask
+    even when `TELEGRAM_BOT_TOKEN` is present. Kept as its own flag rather
+    than folded into `PK_REAL_TELEPHONY` so each real-dispatch channel stays
+    independently toggleable, matching every other `PK_REAL_*` flag in this
+    file being scoped to exactly one thing."""
+    return os.environ.get(ENV_REAL_TELEGRAM, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 class WorldRunner:
     """Owns the virtual day counter, the Ledger, the Messenger, the Sentinel,
     the seeded rng and the perception provider — i.e. one whole world.
@@ -309,6 +336,8 @@ class WorldRunner:
         root: Path = ROOT,
         real_razorpay: bool | None = None,
         real_tts: bool | None = None,
+        real_telephony: bool | None = None,
+        real_telegram: bool | None = None,
     ) -> None:
         self.seed = seed
         self.rng = random.Random(seed)
@@ -325,6 +354,18 @@ class WorldRunner:
         self.provider_name = self.provider.name
         self.real_razorpay = _real_razorpay_enabled() if real_razorpay is None else real_razorpay
         self.real_tts = _real_tts_enabled() if real_tts is None else real_tts
+        self.real_telephony = _real_telephony_enabled() if real_telephony is None else real_telephony
+        """Reflects `PK_REAL_TELEPHONY` — whether a real call is even ALLOWED
+        to be attempted (packet P16, now via Infobip). This is one of the
+        conditions `_should_go_real_telephony()` checks; it being True does
+        NOT mean every reminder goes real, only that autonomous actions are
+        still structurally blocked and a manual one with a real submitted
+        contact and a working credential may."""
+        self.real_telegram = _real_telegram_enabled() if real_telegram is None else real_telegram
+        """Reflects `PK_REAL_TELEGRAM` — whether a real Telegram send is even
+        ALLOWED to be attempted (packet P17). Same shape as `real_telephony`:
+        autonomous actions can never reach a real Telegram send regardless of
+        this flag; see `_should_go_real_telegram()`."""
 
         self.day = 0
         self.events: list[Event] = []
@@ -862,9 +903,7 @@ class WorldRunner:
             self._schedule_at(day + LINK_TIMEOUT_DAYS, "link_timeout", entity_id,
                               {"action_id": action.id, "kind": kind})
         elif kind == "message":
-            stage = action.params.get("stage", "firm")
-            self._send(action, ESCALATION_TEXT.get(stage, ESCALATION_TEXT["firm"]).format(
-                amount=self._amount(entity_id), entity_id=entity_id), day)
+            self._dispatch_message(action, day)
         elif kind == "voice":
             self._dispatch_voice(action, day)
         elif kind == "sms":
@@ -902,6 +941,69 @@ class WorldRunner:
     # artificial retries are wired either: retries exist for something that can
     # transiently fail, and dispatch here contacts no provider that could.
 
+    def _dispatch_message(self, action: Action, day: int) -> None:
+        """The escalation ladder's plain WhatsApp/email nudge — unchanged
+        text-building from before packet P16 (`ESCALATION_TEXT` by stage,
+        never `custom_text`: the dashboard's manual message button has always
+        said this button ignores that box, and this keeps it true).
+
+        Two independent real-send attempts can layer on top of the simulated
+        Messenger queue entry below, each gated by its own flag/credential:
+          * Twilio WhatsApp (packet P16) — dormant by default (WhatsApp stays
+            the documented real-world channel, not what this deployed demo
+            runs on — see tracking/DECISIONS.md, 2026-08-27), fires only if
+            `PK_REAL_TELEPHONY=1` AND Twilio credentials exist AND the
+            entity's thread channel is `wa`.
+          * Telegram (packet P17, the actual real-send path this demo uses)
+            — fires if `_should_go_real_telegram` allows it, independent of
+            the entity's simulated thread channel (Telegram is a distinct
+            real channel, not a stand-in for the simulated wa/email rail).
+        Neither changes `runner.reminders`/audit shape for callers that don't
+        care about the real send — the simulated `_send` call always happens.
+        """
+        entity_id = action.entity_id
+        stage = action.params.get("stage", "firm")
+        text = ESCALATION_TEXT.get(stage, ESCALATION_TEXT["firm"]).format(
+            amount=self._amount(entity_id), entity_id=entity_id)
+        channel = self.channel_of.get(entity_id, "wa")
+        detail: dict[str, Any] = {}
+
+        if channel == "wa" and self._should_go_real_telephony(action, entity_id):
+            resolved = self.resolve_contact(entity_id)
+            try:
+                result = telephony.send_whatsapp(resolved["contact"], text)
+            except telephony.TelephonyError as exc:
+                detail.update({"whatsapp_status": "real_send_failed", "whatsapp_error": str(exc)})
+                self._audit(
+                    entity_id, "sentinel",
+                    "real WhatsApp send failed — message still queued on the simulated rail",
+                    {"action_id": action.id, "error": str(exc)}, day,
+                )
+            else:
+                detail.update({
+                    "whatsapp_status": "real_message_sent",
+                    "whatsapp_sid": result["sid"], "whatsapp_to": result["to"],
+                })
+
+        if self._should_go_real_telegram(action, entity_id):
+            resolved = self.resolve_contact(entity_id)
+            try:
+                result = telegram_bot.send_message(resolved["telegram_chat_id"], text)
+            except telegram_bot.TelegramError as exc:
+                detail.update({"telegram_status": "real_send_failed", "telegram_error": str(exc)})
+                self._audit(
+                    entity_id, "sentinel",
+                    "real Telegram send failed — message still queued on the simulated rail",
+                    {"action_id": action.id, "error": str(exc)}, day,
+                )
+            else:
+                detail.update({
+                    "telegram_status": "real_message_sent",
+                    "telegram_message_id": result["message_id"],
+                })
+
+        self._send(action, text, day, extra=detail or None)
+
     def _dispatch_voice(self, action: Action, day: int) -> None:
         """A real, generated, playable MP3 — and an honestly simulated dial.
 
@@ -923,6 +1025,35 @@ class WorldRunner:
                 "rail did, if one is ever supplied."
             ),
         }
+        if self._should_go_real_telephony(action, entity_id):
+            # packet P16: an operator's own click, real Twilio credentials,
+            # explicit PK_REAL_TELEPHONY=1 opt-in, and a real submitted
+            # contact — all four gates in `_should_go_real_telephony` passed.
+            # This is genuinely a different phone call, not the gTTS audio
+            # below: Twilio's own text-to-speech reads `text` aloud live.
+            resolved = self.resolve_contact(entity_id)
+            try:
+                result = telephony.place_call(resolved["contact"], text)
+            except telephony.TelephonyError as exc:
+                detail.update({
+                    "dial_status": "real_call_failed",
+                    "dial_note": f"a real call was attempted via Twilio and failed: {exc}",
+                    "dial_error": str(exc),
+                })
+                self._audit(
+                    entity_id, "sentinel",
+                    "real phone call failed — reminder still generated as audio/transcript only",
+                    {"action_id": action.id, "error": str(exc)}, day,
+                )
+            else:
+                detail.update({
+                    "dial_status": "real_call_placed",
+                    "dial_note": (
+                        "a real phone call was placed via Twilio, reading this text aloud "
+                        "through Twilio's own text-to-speech."
+                    ),
+                    "call_sid": result["sid"], "call_to": result["to"],
+                })
         if not self.real_tts:
             # `PK_REAL_TTS=0` — an air-gapped machine or a CI box. Kept distinct
             # from "failed": we did not call, so we must not claim we tried.
@@ -954,6 +1085,28 @@ class WorldRunner:
                 "audio_bytes": path.stat().st_size,
                 "tts_engine": "gTTS", "tts_lang": tts.VOICE_LANG,
             })
+            # packet P17: the same real generated MP3 can ALSO be delivered as
+            # a real Telegram audio message — independent of the Infobip real
+            # call above, gated by its own `_should_go_real_telegram` check.
+            # Unlike the call, Telegram delivery is genuinely real end to end
+            # (see engine/action/telegram_bot.py) — nothing left to simulate
+            # once a real bot token and a real chat_id are used.
+            if self._should_go_real_telegram(action, entity_id):
+                resolved = self.resolve_contact(entity_id)
+                try:
+                    result = telegram_bot.send_voice(resolved["telegram_chat_id"], path, caption=text)
+                except telegram_bot.TelegramError as exc:
+                    detail.update({"telegram_status": "real_send_failed", "telegram_error": str(exc)})
+                    self._audit(
+                        entity_id, "sentinel",
+                        "real Telegram audio send failed — audio still generated and playable locally",
+                        {"action_id": action.id, "error": str(exc)}, day,
+                    )
+                else:
+                    detail.update({
+                        "telegram_status": "real_message_sent",
+                        "telegram_message_id": result["message_id"],
+                    })
 
         self._send(action, text, day, extra=detail)
         self._record_reminder(action, "voice", text, detail, day)
@@ -1215,12 +1368,14 @@ class WorldRunner:
             return {
                 "name": contact.name, "contact": contact.phone,
                 "email": DEMO_CUSTOMER_EMAIL, "source": "operator_submitted",
+                "telegram_chat_id": contact.telegram_chat_id,
             }
         invoice = self.invoices.get(entity_id)
         name = DEBTOR_BY_ID.get(invoice.debtor_id, {}).get("name", entity_id) if invoice else entity_id
         return {
             "name": name, "contact": DEMO_CUSTOMER_CONTACT,
             "email": DEMO_CUSTOMER_EMAIL, "source": "demo_fallback",
+            "telegram_chat_id": None,
         }
 
     def _contact_fields(self, entity_id: str) -> dict:
@@ -1232,7 +1387,53 @@ class WorldRunner:
             "contact_name": resolved["name"],
             "contact_phone": resolved["contact"],
             "contact_source": resolved["source"],
+            "telegram_chat_id": resolved["telegram_chat_id"],
         }
+
+    def _should_go_real_telephony(self, action: Action, entity_id: str) -> bool:
+        """The one gate every real-call/real-WhatsApp attempt passes through
+        (packet P16). All four conditions are required — see
+        `engine/action/telephony.py`'s module docstring for why each exists:
+
+          1. `action.params.get("manual")` — NEVER for an autonomous ladder
+             action, regardless of config, so the automated 45-day simulator
+             and every `pytest` run stay network-free even on a machine whose
+             `.env` holds real Twilio credentials.
+          2. `self.real_telephony` (`PK_REAL_TELEPHONY=1`) — an explicit
+             opt-in on top of the credential existing, because this has a
+             real-world effect on a real person, unlike a locally-generated
+             gTTS file.
+          3. `telephony.is_configured()` — the credential must actually be
+             present; opting in with no credential falls straight through to
+             today's simulated behaviour, not an error.
+          4. the resolved contact must be a real operator submission
+             (`source == "operator_submitted"`) — the synthetic demo number
+             is never dialled for real, no matter how the other three flags
+             are set.
+        """
+        if not action.params.get("manual"):
+            return False
+        if not self.real_telephony:
+            return False
+        if not telephony.is_configured():
+            return False
+        return self.resolve_contact(entity_id)["source"] == "operator_submitted"
+
+    def _should_go_real_telegram(self, action: Action, entity_id: str) -> bool:
+        """The Telegram equivalent of `_should_go_real_telephony` (packet
+        P17). Same manual-only + explicit-opt-in + credential-present shape,
+        with one Telegram-specific fourth condition: a `telegram_chat_id`
+        must actually be on file — unlike a phone number, there is no
+        "synthetic demo chat_id" to fall back to or guard against, because
+        Telegram addresses a chat_id, not a phone number, and one can only
+        exist after a real opt-in (the debtor messaging the bot first)."""
+        if not action.params.get("manual"):
+            return False
+        if not self.real_telegram:
+            return False
+        if not telegram_bot.is_configured():
+            return False
+        return bool(self.resolve_contact(entity_id)["telegram_chat_id"])
 
     def _persona(self, entity_id: str) -> str:
         invoice = self.invoices[entity_id]

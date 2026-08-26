@@ -146,6 +146,7 @@ def test_resolve_contact_is_byte_identical_to_the_old_hardcoded_fallback_when_no
         "contact": DEMO_CUSTOMER_CONTACT,
         "email": DEMO_CUSTOMER_EMAIL,
         "source": "demo_fallback",
+        "telegram_chat_id": None,  # packet P17: no Telegram opt-in without a submitted contact
     }
 
 
@@ -171,6 +172,7 @@ def test_a_submitted_contact_resolves_for_the_entity_and_every_sibling_invoice(w
             "contact": "9812345678",
             "email": DEMO_CUSTOMER_EMAIL,  # email is never collected — stays synthetic
             "source": "operator_submitted",
+            "telegram_chat_id": None,  # packet P17: not linked in this test
         }
 
 

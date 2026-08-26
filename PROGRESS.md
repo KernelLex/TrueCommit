@@ -1,5 +1,5 @@
 # PROGRESS.md — Promise Keeper build status
-### Last updated: 2026-08-27 (P15 merged — real contact directory, wired into every dispatch point) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
+### Last updated: 2026-08-27 (P16+P17 — real phone call + real Telegram message/audio, both confirmed live) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
 
 > **Handing over between Claude sessions? Read `HANDOVER.md` first** — it carries the build mechanism (three-tier orchestration), the laws, the resume procedure, and the in-flight packet specs.
 
@@ -97,6 +97,27 @@ Lead re-ran the full suite (445/445) and independently verified the three "byte-
 ## ⚠ STALE-SERVER FOOTGUN FOUND AND FIXED (2026-08-26) — restart both servers together after any merge
 User saw "Not Found" on Day Story and the Human-Review Queue in the browser. Root cause: the dashboard was talking to uvicorn/Vite processes started hours earlier, before P9/P10 (which added those exact routes) had even merged — Python doesn't hot-reload, so the old process genuinely had no `/review-queue` or `/day/{n}/story` routes. Found FOUR stale processes total (two duplicate uvicorns on :8010, two more on :8123, one stale Vite). All killed, fresh instances started, both new routes confirmed 200. **Lesson for every future demo session: after any merge, kill and restart both the API and the dashboard dev server together** — a survived-merge stale server is now a known, named failure mode, not a mystery to re-diagnose each time.
 
+## ✅ P16 + P17 — real phone call (Twilio) + real Telegram message/audio, both confirmed live (2026-08-27)
+New scope, user-confirmed (same "build now, accept the freeze risk" pattern), across two closely-linked packets. Full narrative including every real bug found and fixed, and the exact error text at each step: `tracking/BUILD_LOG.md`. Scope/rationale record: `tracking/DECISIONS.md`.
+
+**What the user asked for:** a real phone call and a real WhatsApp message reaching their own phone live, followed by actually approving the resulting mandate.
+
+**WhatsApp hit a real wall at every option tried, in order:** Twilio's Sandbox needs a pre-approved message template for a business-initiated message outside a live session (`HTTP 400: ContentSid Required` — Meta's own policy, not Twilio's); Meta's own direct Cloud API was wired with real credentials but never live-tested with an actual send this session; Infobip's number verification failed with a security flag on every number tried; Exotel requires real company KYC a hackathon project cannot provide. **Telegram's Bot API had none of this** — free forever, no card, no business verification, no template approval — and became the real message/voice-note channel this deployed demo actually uses. WhatsApp stays the documented, intended real-world channel (merchants' actual debtors use WhatsApp) — this is a pragmatic demo choice, not a product pivot.
+
+**The phone call took four real bugs to get working, confirmed live at the end — honestly, not on the first try after all four were fixed:**
+1. Twilio trial accounts reject inline TwiML outright (`HTTP 400: Invalid or disallowed parameters... trial accounts have limited parameter access`) — found by isolating against Twilio's own public demo TwiML URL, which worked.
+2. TwiML Bins (Twilio's own hosted-snippet feature, tried as the fast path to a URL) turned out to also be trial-gated (`HTTP 401` on the Serverless API they live under) — diagnosed for free, without spending call quota, by querying the API directly.
+3. Built this project's own `GET/POST /telephony/twiml` webhook and exposed it via a real public URL using **Tailscale Funnel** (`https://supercom.tail5b897d.ts.net`) — then found and fixed two more real bugs: the route only accepted GET (Twilio defaults to POST when fetching a `url=`), and it returned `Content-Type: application/xml` instead of the `text/xml` Twilio's fetcher specifically requires.
+4. A genuine methodology mistake caught along the way: repeated `curl` checks from this same machine kept succeeding because it's *on* the same Tailscale network as the tunnel, so requests were resolving to a private internal IP and never actually testing the real public path — caught via `curl -v` showing the true connection target, confirmed instead via a genuinely external fetch.
+
+**End state:** confirmed live by the user — a real call spoke the real reminder text, and a real Telegram message + audio both landed correctly. One honest caveat, documented rather than glossed over: two attempts on the identical, already-fixed code failed immediately before the successful one, most likely intermittent tunnel-connection warm-up rather than a fifth undiscovered bug — not root-caused further past that point since Twilio's own detailed call debugger requires a paid account tier, and the user explicitly called a stop to further debugging once free diagnosis was exhausted.
+
+**Guardrail discipline preserved on both new real-delivery paths, proven the same way P14 proved it for `sms`:** `_should_go_real_telephony()`/`_should_go_real_telegram()` never fire for an autonomous action regardless of any `.env` credential or opt-in flag — the full seeded 45-day run makes zero real calls/sends even with both opt-in flags on, asserted by tests that replace the real-send functions with ones that raise if ever called. A manual click only reaches either function after the ordinary `check_bounds()` gate has already allowed the touch — no private door, no softer rule for going real.
+
+**A real bug found and fixed in the API response layer, not just the dispatch code:** a real Telegram send was succeeding (confirmed by a genuine Telegram `message_id` coming back) while `POST /remind-now`'s JSON response silently omitted any sign of it — `api/main.py`'s response-builder had a whitelist of fields to surface and nobody had added the two Telegram ones. Found by adding temporary debug prints to the live server and watching the real request trace; fixed with a two-line addition; pinned by a regression test that fails on the pre-fix code.
+
+**Tests:** 525 → **554** passing (`tests/test_telephony.py` — 16, `tests/test_telegram_dispatch.py` — 11, three test-count net since some overlap in fixture-sharing). Seeded 45-day run re-verified byte-identical across two fresh processes; the run's own numbers (₹23,31,496 etc.) are completely untouched. No secrets leaked — `.env` holds four new real credential types (Twilio, Meta WhatsApp, Telegram), all gitignored, re-grepped clean across the whole repo.
+
 ## ✅ P15 MERGED — real contact directory (2026-08-27)
 New scope, user-confirmed (same "build now, accept the freeze risk" pattern as P13/P14), and a locked design call: channel selection (voice vs message vs mandate_offer) stays purely stage-based — trust score is not a new input into it, so `check_bounds`/`state_machine.py`/`trust.py` are untouched by this packet.
 - Every debtor had shared ONE synthetic fake contact (`+919812345678`) since Day 6. Now: `POST /entities/{id}/contact` {name, phone} stores a real contact keyed by **debtor_id** (a submission for one invoice auto-applies to every sibling invoice of that debtor — same per-debtor scoping as the touch cap, so nobody ends up with two contradictory numbers on file). `WorldRunner.resolve_contact()` is the single place every dispatch point — voice, SMS, WhatsApp message, and the real Razorpay mandate/link call — reads who to contact, returning the real submission or the exact old synthetic fallback, explicitly labeled `operator_submitted` vs `demo_fallback`.
@@ -152,8 +173,9 @@ All eight beats executed live against the merged code; every number below was pr
 
 ## How to run what exists today
 ```
-./.venv/Scripts/python.exe -m pytest tests/ -q          # 525 tests
+./.venv/Scripts/python.exe -m pytest tests/ -q          # 554 tests
 ./.venv/Scripts/python.exe -m sim.run --days 45 --seed 42   # deterministic world
 ./.venv/Scripts/python.exe -m uvicorn api.main:app          # API on :8000
 ./.venv/Scripts/python.exe -m scripts.verify_razorpay_sandbox  # live sandbox probes (needs .env keys)
 ```
+**For a live real-call demo specifically** (not needed for anything else — the core app runs with none of this): `PK_REAL_TELEPHONY=1 PK_REAL_TELEGRAM=1` must be set as real process env vars at server launch (writing them into `.env` alone is not enough — see `tracking/BUILD_LOG.md`), and Twilio's real-call path additionally needs `PUBLIC_BASE_URL` in `.env` pointing at a real public URL for this app (a deployed instance, or `tailscale funnel --bg 8010` for a dev-machine tunnel).
