@@ -696,15 +696,28 @@ def test_real_razorpay_is_off_unless_explicitly_enabled(monkeypatch):
 
 def test_no_network_is_attempted_by_default(monkeypatch):
     """Make every Razorpay entry point explode, then run the world. If a
-    single call were attempted, this test would fail loudly."""
+    single call were attempted, this test would fail loudly.
+
+    Packet P14 widened this to cover gTTS as well. Text-to-speech hits the
+    public internet, and the seeded run happens to make no voice notes at all
+    (every ESCALATE_2 voice action is refused by the touch cap — see
+    tracking/BUILD_LOG.md). That is a fact about the current dataset and cadence,
+    not a guarantee, so it is asserted here rather than relied on: a future
+    change that starts generating audio during a run would otherwise make the
+    whole suite quietly network-dependent.
+    """
 
     def explode(*args, **kwargs):
         raise AssertionError("a Razorpay call was attempted with PK_REAL_RAZORPAY unset")
+
+    def explode_tts(*args, **kwargs):
+        raise AssertionError("a gTTS network call was attempted during a plain 45-day run")
 
     monkeypatch.delenv("PK_REAL_RAZORPAY", raising=False)
     monkeypatch.setattr(razorpay_client, "create_payment_link", explode)
     monkeypatch.setattr(razorpay_client, "create_mandate_registration_link", explode)
     monkeypatch.setattr(razorpay_client, "RazorpayClient", explode)
+    monkeypatch.setattr("gtts.gTTS", explode_tts)
 
     runner = WorldRunner()
     runner.advance(RUN_DAYS)

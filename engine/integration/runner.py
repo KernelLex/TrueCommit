@@ -82,6 +82,24 @@ later one flows through the simulated messenger. Real calls are wrapped in the
 Sentinel (`record_send_attempt` -> retry/backoff/dead-letter), and the real
 `short_url` is written into the audit trail — that is BUILD.md Day 6's "real
 test-mode Payment Link URL appears in audit trail" criterion.
+
+REMINDERS: REAL CONTENT, SIMULATED DELIVERY (packet P14)
+--------------------------------------------------------
+A `voice` action now produces a genuine gTTS-generated MP3 on disk (playable in
+the dashboard) and an `sms` action produces a genuine message string. What is
+simulated, and labelled as such on every single record, is the DELIVERY: no
+phone is dialled (`dial_status: "simulated_no_telephony_provider"`) and no
+handset receives an SMS (`send_status: "simulated_no_sms_provider"`), because
+this project holds no telephony or SMS-gateway credential. See
+`_dispatch_voice` / `_dispatch_sms` below and `engine/action/tts.py`.
+
+Both the AUTONOMOUS trigger (`_ESCALATE_ACTION["ESCALATE_2"] -> ("voice", ...)`,
+unchanged since Day 5) and the OPERATOR trigger (`Ledger.manual_reminder()`, new
+in P14) reach these branches only after passing the same `check_bounds()` and
+spending a touch from the same per-debtor weekly budget. Measured on the seeded
+45-day run: the autonomous voice action is attempted 4 times and refused all 4
+times by `max_touches_per_week` — the bound is genuinely load-bearing on this
+channel, not decorative.
 """
 
 import datetime as dt
@@ -96,6 +114,7 @@ from engine.action.evidence import build_evidence_packet
 from engine.action.messenger import Messenger, Rail
 from engine.action.razorpay_client import RazorpayError
 from engine.action.sentinel import MAX_RETRIES, Sentinel
+from engine.action import tts
 from engine.judgment.ledger import Ledger
 from engine.judgment.state_machine import MAX_TOUCHES_PER_WEEK, TERMINAL_STATES, TOUCH_WINDOW_DAYS
 from engine.perception.providers import get_provider
@@ -129,6 +148,18 @@ carry no commitment to capture, so no mandate is offered against them."""
 
 ENV_REAL_RAZORPAY = "PK_REAL_RAZORPAY"
 
+# Synthetic, non-routable demo contact — never real PII. NOT a repeated-digit
+# filler on purpose: `POST /payment_links` rejects those outright ("Recurring
+# digits in customer contact are disallowed", found live 2026-08-26 — see
+# tracking/BUILD_LOG.md), even though `subscription_registration/auth_links`
+# accepts them. Single source of truth for the ONE fake-data convention this
+# codebase uses for a Razorpay customer block — `_real_razorpay_call` below
+# and the packet P13 demo-console route (`api/main.py`) both fall back to
+# these exact values so there is never a second, drifting "fake customer"
+# shape anywhere in the system.
+DEMO_CUSTOMER_CONTACT = "+919812345678"
+DEMO_CUSTOMER_EMAIL = "promise-keeper-demo@example.com"
+
 # --- rails (master doc §8.5) -------------------------------------------------
 def _rail_for(kind: str, channel: str) -> Rail:
     if kind == "mandate_offer":
@@ -137,6 +168,8 @@ def _rail_for(kind: str, channel: str) -> Rail:
         return "wa_native_payment" if channel == "wa" else "plain_link"
     if kind == "voice":
         return "voice_note"
+    if kind == "sms":
+        return "sms_text"
     return "text_only"
 
 
@@ -196,11 +229,66 @@ ESCALATION_TEXT = {
         "against {entity_id}, and on which date? (Rs.{amount:,} is outstanding.)"
     ),
 }
-VOICE_TEXT = "[voice note, Hinglish] {entity_id} ka Rs.{amount:,} abhi tak pending hai, please clear kara dijiye."
+VOICE_TEXT = "{entity_id} ka Rs.{amount:,} abhi tak pending hai, please clear kara dijiye."
+"""The Hinglish voice-note script. It used to carry a literal
+"[voice note, Hinglish] " prefix — a label standing in for audio that did not
+exist, back when a `voice` action was a text line on a "voice_note" rail.
+Packet P14 removed the label because the audio is now real and gTTS would read
+the brackets out loud. Nothing was lost: the rail (`voice_note`) and the
+reminder record's `channel` still say what this is, in the two places a machine
+reads it rather than in the sentence a human hears."""
+
+SMS_TEXT = "Reminder: Rs.{amount:,} against {entity_id} is still outstanding. Please confirm a payment date."
+"""The SMS channel needs no generation step — this string IS the content, and
+it is a real message a human can read. Deliberately plain ASCII and short: an
+SMS is a 160-character rail, not a place for the Hinglish voice copy."""
+
+# The one sentence that must appear on every dispatched reminder record, and the
+# reason it must (packet P14). The AUDIO and the TEXT are real; the DELIVERY is
+# not, because this project holds no telephony/SMS-gateway credential of any
+# kind. Same discipline as `execute_mandate`'s `simulated: true` + `reason`:
+# never let a record imply a handset was reached.
+DIAL_STATUS_SIMULATED = "simulated_no_telephony_provider"
+SEND_STATUS_SIMULATED = "simulated_no_sms_provider"
 
 
 def _real_razorpay_enabled() -> bool:
     return os.environ.get(ENV_REAL_RAZORPAY, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _repo_relative(path: Path) -> str:
+    """A forward-slashed, repo-relative path for the audit trail — falling back
+    to the absolute path when the file genuinely lives outside the repo.
+
+    The fallback is not defensive padding: `Path.relative_to()` RAISES rather
+    than returning None when the paths do not share a root, and the voice-note
+    directory is redirected outside the repo whenever a test (or a deployment
+    with a different asset root) points `tts.VOICE_NOTE_DIR` elsewhere. Found
+    the hard way while writing the P14 tests — see tracking/BUILD_LOG.md.
+    """
+    try:
+        return str(path.relative_to(ROOT)).replace("\\", "/")
+    except ValueError:
+        return str(path).replace("\\", "/")
+
+
+ENV_REAL_TTS = "PK_REAL_TTS"
+
+
+def _real_tts_enabled() -> bool:
+    """OPT-OUT, unlike `PK_REAL_RAZORPAY`'s opt-in, and the asymmetry is
+    deliberate. A Razorpay call moves against a real merchant account and costs
+    something, so it must be asked for; gTTS is free, credential-less, and the
+    whole point of the reminder feature is that the audio is real — a demo that
+    produced silent placeholders by default would be the dishonest option.
+
+    Set `PK_REAL_TTS=0` on an air-gapped machine or in CI to skip generation
+    entirely: the reminder is still created and still carries its transcript,
+    marked `audio_generation: "disabled"` rather than "failed", because "we
+    chose not to call" and "we called and it broke" are different facts and the
+    record should not blur them.
+    """
+    return os.environ.get(ENV_REAL_TTS, "").strip().lower() not in {"0", "false", "no", "off"}
 
 
 class WorldRunner:
@@ -219,6 +307,7 @@ class WorldRunner:
         provider: str | None = None,
         root: Path = ROOT,
         real_razorpay: bool | None = None,
+        real_tts: bool | None = None,
     ) -> None:
         self.seed = seed
         self.rng = random.Random(seed)
@@ -228,6 +317,7 @@ class WorldRunner:
         self.provider = get_provider(provider)
         self.provider_name = self.provider.name
         self.real_razorpay = _real_razorpay_enabled() if real_razorpay is None else real_razorpay
+        self.real_tts = _real_tts_enabled() if real_tts is None else real_tts
 
         self.day = 0
         self.events: list[Event] = []
@@ -236,6 +326,17 @@ class WorldRunner:
         self.triage: dict[str, Any] = {}
         self.cart_causes: dict[str, Any] = {}
         self.evidence_packets: list[Any] = []
+
+        self.reminders: list[dict] = []
+        """Every voice/SMS reminder this world actually DISPATCHED (packet P14),
+        newest last: the real transcript, the real generated MP3's path/URL (or
+        the honest `audio_generation: "failed"` marker), and the explicit
+        simulated-delivery field. Pure bookkeeping written by `_dispatch`;
+        nothing reads it to decide anything, it exists so `GET
+        /entities/{id}/reminders` can show a human the real content instead of
+        re-deriving it. BLOCKED attempts are deliberately NOT here — they never
+        reached dispatch — and are read from `ledger.gate_log`, which recorded
+        the refusal with the full per-bound checklist at the moment it happened."""
 
         self.invoices: dict[str, Invoice] = {}
         self.carts: dict[str, Cart] = {}
@@ -702,6 +803,20 @@ class WorldRunner:
         self.actions.append(action)
         self._dispatch(action, self.day)
 
+    def audit_manual(self, entity_id: str, summary: str, detail: dict) -> AuditEntry:
+        """Public door onto the private `_audit` helper, for callers OUTSIDE
+        this module that need to write a genuine append-only audit entry for
+        something a HUMAN did directly — packet P13's Demo Console "Create
+        Mandate Now" button (`api/main.py`) is the one caller today. `layer`
+        is always "action": this only ever describes a real side effect (or a
+        real failed attempt at one), never a judgment-layer decision. It is
+        NEVER used for anything the agent itself decided — those go through
+        `_emit`/`ledger.process_event` exactly as they always have, with the
+        ledger's own gate writing that audit entry before the Action is even
+        returned. A caller reaching for this method instead of that path is
+        by definition describing a human's own click, not the agent's."""
+        return self._audit(entity_id, "action", summary, detail, self.day)
+
     # -- the one way anything happens ---------------------------------------
 
     def _emit(self, event_type: str, entity_id: str, payload: dict, day: int) -> Action | None:
@@ -744,7 +859,9 @@ class WorldRunner:
             self._send(action, ESCALATION_TEXT.get(stage, ESCALATION_TEXT["firm"]).format(
                 amount=self._amount(entity_id), entity_id=entity_id), day)
         elif kind == "voice":
-            self._send(action, VOICE_TEXT.format(amount=self._amount(entity_id), entity_id=entity_id), day)
+            self._dispatch_voice(action, day)
+        elif kind == "sms":
+            self._dispatch_sms(action, day)
         elif kind == "mandate_execute":
             self._audit(entity_id, "action", f"mandate execution attempt (retry {action.params.get('retry', 0)})",
                         {"action_id": action.id, "params": action.params, "source": action.params.get("source", "mandate")}, day)
@@ -753,6 +870,131 @@ class WorldRunner:
         elif kind == "human_handoff":
             self._audit(entity_id, "action", "routed to the human review queue",
                         {"action_id": action.id, "params": action.params}, day)
+
+    # -- reminders: real content, honestly-labelled delivery (packet P14) -----
+    #
+    # Both branches below are reached from exactly two places and no others:
+    #   * the AUTONOMOUS path — `_ESCALATE_ACTION["ESCALATE_2"]` produces a
+    #     `voice` Action through `_decide_action` -> `_try_action` -> `_gate`,
+    #     dispatched by `_emit` like any other action, and
+    #   * the OPERATOR path — `Ledger.manual_reminder()`, dispatched by
+    #     `dispatch_action` after the SAME `_gate()` call refused or allowed it.
+    # Neither one can reach here without having passed `check_bounds()` and
+    # having spent a touch from the debtor's weekly budget.
+    #
+    # DELIBERATELY NOT DONE HERE: reminders are NOT registered in
+    # `_open_instruments` and get no 48h `link_timeout` beat. That machinery
+    # (packet P11) answers "was the LINK opened?" — it needs something openable
+    # and a signal that it was. A voice note and an SMS carry no URL, so there
+    # is no open event to wait for and inventing a "never opened" verdict for
+    # them would be manufacturing a delivery signal we do not have, which is
+    # precisely what P11 was careful not to do. They DO still go through
+    # `sentinel.record_send_attempt(..., success=True, ...)` inside `_send`,
+    # like every other dispatched instrument, so the dead-letter and
+    # circuit-breaker bookkeeping stays consistent across all kinds. No
+    # artificial retries are wired either: retries exist for something that can
+    # transiently fail, and dispatch here contacts no provider that could.
+
+    def _dispatch_voice(self, action: Action, day: int) -> None:
+        """A real, generated, playable MP3 — and an honestly simulated dial.
+
+        The transcript is decided BEFORE this runs (the ledger's template, the
+        ledger's amount, or the operator's own typed words). gTTS only converts
+        that finished sentence into audio; it chooses no content (CLAUDE.md law
+        1, and see engine/action/tts.py).
+        """
+        entity_id = action.entity_id
+        text = self._reminder_text(action, VOICE_TEXT)
+        detail: dict[str, Any] = {
+            "channel": "voice",
+            "manual": bool(action.params.get("manual")),
+            "dial_status": DIAL_STATUS_SIMULATED,
+            "dial_note": (
+                "the audio below is real and playable; no phone was dialled — this project "
+                "holds no telephony credential. Flips real the same way the Razorpay mandate "
+                "rail did, if one is ever supplied."
+            ),
+        }
+        if not self.real_tts:
+            # `PK_REAL_TTS=0` — an air-gapped machine or a CI box. Kept distinct
+            # from "failed": we did not call, so we must not claim we tried.
+            detail.update({"audio_generation": "disabled", "audio_url": None,
+                           "audio_note": f"{ENV_REAL_TTS} is off; no TTS call was attempted"})
+            self._send(action, text, day, extra=detail)
+            self._record_reminder(action, "voice", text, detail, day)
+            return
+
+        try:
+            path = tts.generate_voice_note(
+                text, tts.VOICE_NOTE_DIR, name=tts.voice_note_stem(entity_id, action.id),
+            )
+        except tts.VoiceGenerationError as exc:
+            # No failure is silent (Sentinel's own ethos) and no network hiccup
+            # takes down a simulated day: the reminder still exists, it just has
+            # no audio, and the record says exactly that rather than pretending.
+            detail.update({"audio_generation": "failed", "audio_url": None, "audio_error": str(exc)})
+            self._audit(
+                entity_id, "sentinel",
+                "voice note audio generation failed — reminder kept as transcript only",
+                {"action_id": action.id, "error": str(exc), "transcript": text}, day,
+            )
+        else:
+            detail.update({
+                "audio_generation": "ok",
+                "audio_url": f"/voice-notes/{path.name}",
+                "audio_file": _repo_relative(path),
+                "audio_bytes": path.stat().st_size,
+                "tts_engine": "gTTS", "tts_lang": tts.VOICE_LANG,
+            })
+
+        self._send(action, text, day, extra=detail)
+        self._record_reminder(action, "voice", text, detail, day)
+
+    def _dispatch_sms(self, action: Action, day: int) -> None:
+        """A real SMS string on a real `sms` channel, with no gateway behind it.
+
+        There is no generation step — the text IS the content. What is simulated
+        is the same thing as for voice: the handoff to a carrier, which needs a
+        credential this project does not have.
+        """
+        text = self._reminder_text(action, SMS_TEXT)
+        detail: dict[str, Any] = {
+            "channel": "sms",
+            "manual": bool(action.params.get("manual")),
+            "send_status": SEND_STATUS_SIMULATED,
+            "send_note": (
+                "the message text below is real; it reached no handset — this project holds "
+                "no SMS-gateway credential."
+            ),
+        }
+        self._send(action, text, day, extra=detail, channel="sms")
+        self._record_reminder(action, "sms", text, detail, day)
+
+    def _reminder_text(self, action: Action, template: str) -> str:
+        """The operator's own words when they supplied any, otherwise the
+        ledger-driven template. `custom_text` is used VERBATIM and is never
+        `.format()`ed — it is a human's sentence, not a template, and running it
+        through format() would both break on a stray brace and give typed text a
+        way to interpolate system values into itself. The template branch quotes
+        `self._amount()`, which reads the LEDGER's invoice record (law 2)."""
+        custom = action.params.get("custom_text")
+        if isinstance(custom, str) and custom.strip():
+            return custom.strip()
+        return template.format(amount=self._amount(action.entity_id), entity_id=action.entity_id)
+
+    def _record_reminder(self, action: Action, channel: str, text: str, detail: dict, day: int) -> None:
+        self.reminders.append({
+            "action_id": action.id,
+            "entity_id": action.entity_id,
+            "channel": channel,
+            "text": text,
+            "manual": bool(action.params.get("manual")),
+            "stage": action.params.get("stage"),
+            "reason": action.reason,
+            "ts": self._ts(day).isoformat(),
+            "day": day,
+            **{k: v for k, v in detail.items() if k != "channel"},
+        })
 
     def _instrument_text(self, action: Action, detail: dict) -> str:
         """Copy for a payment instrument. The amount is `action.params`' —
@@ -774,9 +1016,16 @@ class WorldRunner:
                if p.invoice_id == entity_id and p.status == "pending"]
         return due[-1] if due else None
 
-    def _send(self, action: Action, text: str, day: int, extra: dict | None = None) -> None:
+    def _send(
+        self, action: Action, text: str, day: int, extra: dict | None = None,
+        channel: str | None = None,
+    ) -> None:
+        """`channel` overrides the entity's own thread channel — the SMS branch
+        is the only caller that passes it, because an SMS rides the sms rail
+        regardless of whether this debtor's conversation happens on WhatsApp or
+        email. Every other kind keeps the thread's channel exactly as before."""
         entity_id = action.entity_id
-        channel = self.channel_of.get(entity_id, "wa")
+        channel = channel or self.channel_of.get(entity_id, "wa")
         rail = _rail_for(action.kind, channel)
         message = self.messenger.send(action, channel, text, rail)
         self.messenger.mark_delivered(message.id)
@@ -839,13 +1088,8 @@ class WorldRunner:
         debtor = DEBTOR_BY_ID.get(invoice.debtor_id, {}) if invoice else {}
         customer = {
             "name": debtor.get("name", entity_id),
-            # Synthetic, non-routable demo contact — never real PII. It is NOT
-            # a repeated-digit filler on purpose: `POST /payment_links` rejects
-            # those outright ("Recurring digits in customer contact are
-            # disallowed", found live 2026-08-26 — see tracking/BUILD_LOG.md),
-            # even though `subscription_registration/auth_links` accepts them.
-            "contact": "+919812345678",
-            "email": "promise-keeper-demo@example.com",
+            "contact": DEMO_CUSTOMER_CONTACT,
+            "email": DEMO_CUSTOMER_EMAIL,
         }
         description = f"Promise Keeper {action.kind} for {entity_id}"
         now = self._ts(day)
@@ -1011,6 +1255,7 @@ class WorldRunner:
             "provider_name": self.provider_name,
             "seed": self.seed,
             "real_razorpay": self.real_razorpay,
+            "real_tts": self.real_tts,
             "counts": {
                 "invoices": len(self.invoices),
                 "carts": len(self.carts),

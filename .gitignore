@@ -11,6 +11,11 @@ dashboard/.vite/
 .DS_Store
 metrics/*.json
 !metrics/.gitkeep
+# Generated voice notes (packet P14). Real MP3s produced by gTTS at runtime —
+# regenerated deterministically from the same entity/action ids, so there is
+# nothing to preserve and no reason to commit binaries.
+demo_assets/voice_notes/*.mp3
+!demo_assets/voice_notes/.gitkeep
 rzp.csv
 *.secret
 .claude/settings.local.json

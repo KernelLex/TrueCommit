@@ -18,15 +18,20 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from data.generate import DEBTOR_BY_ID
 from engine import config as agent_config
+from engine.action import razorpay_client, tts
 from engine.action.evidence import render_card
+from engine.action.razorpay_client import RazorpayError
 from engine.integration import day_story
-from engine.integration.runner import WorldRunner
+from engine.integration.runner import DEMO_CUSTOMER_CONTACT, DEMO_CUSTOMER_EMAIL, WorldRunner
 from engine.judgment import state_machine
 from engine.judgment.ledger import (
     CLARIFY_CONFIDENCE_GATE,
+    MANUAL_REMINDER_CHANNELS,
     MONEY_ACTION_CONFIDENCE_GATE,
     ReviewQueueError,
 )
@@ -62,6 +67,19 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Promise Keeper API", version="0.2.0-phase-b", lifespan=lifespan)
+
+VOICE_NOTE_URL_PREFIX = "/voice-notes"
+"""Where the generated MP3s are served from (packet P14). The dashboard reaches
+them at `/api/voice-notes/<file>.mp3` through the Vite dev proxy. The directory
+is created at import time because `StaticFiles` refuses to mount a path that
+does not exist, and a fresh checkout has generated nothing yet."""
+
+tts.VOICE_NOTE_DIR.mkdir(parents=True, exist_ok=True)
+app.mount(
+    VOICE_NOTE_URL_PREFIX,
+    StaticFiles(directory=tts.VOICE_NOTE_DIR),
+    name="voice-notes",
+)
 
 
 class EventIn(BaseModel):
@@ -128,12 +146,26 @@ def post_event(event: EventIn) -> dict | None:
     return json.loads(action.model_dump_json()) if action else None
 
 
+def _entity_row(entity) -> dict:
+    """EntityState (judgment layer, untouched) plus ONE read-only field this
+    composition layer adds on top: `invoice_due`, the real invoice's due date
+    when this entity is a real invoice (`runner.invoices`), else null. Added
+    for packet P13's Demo Console date picker, which shows the real due date
+    it will default to rather than a placeholder — this never mutates or
+    replaces anything EntityState itself reports, it only merges in a sibling
+    fact the judgment layer doesn't carry."""
+    row = json.loads(entity.model_dump_json())
+    invoice = runner.invoices.get(entity.entity_id)
+    row["invoice_due"] = invoice.due.isoformat() if invoice else None
+    return row
+
+
 @app.get("/entities")
 def list_entities() -> list[dict]:
     """Read-only listing of every EntityState the ledger knows about — feeds
     the dashboard's funnel (state -> at-risk/in-recovery/recovered bucket)
     and the entity-timeline picker (P4)."""
-    return [json.loads(e.model_dump_json()) for e in ledger.entities.values()]
+    return [_entity_row(e) for e in ledger.entities.values()]
 
 
 @app.get("/entities/{entity_id}")
@@ -141,7 +173,7 @@ def get_entity(entity_id: str) -> dict:
     entity = ledger.entities.get(entity_id)
     if entity is None:
         raise HTTPException(status_code=404, detail="unknown entity")
-    return json.loads(entity.model_dump_json())
+    return _entity_row(entity)
 
 
 @app.get("/entities/{entity_id}/audit")
@@ -437,6 +469,248 @@ def unpause_entity(entity_id: str) -> dict:
     except ReviewQueueError as exc:
         raise _review_error(exc) from exc
     return {"entity_id": entity_id, "paused": False, "state": entity.state}
+
+
+# ---------------------------------------------------------------------------
+# Reminders: real voice + real SMS (packet P14)
+#
+# READ THE CONTRAST WITH THE DEMO CONSOLE BELOW, because it is the whole point
+# of this pair of routes. `/create-mandate-now` (P13) is an ungated human
+# console: it deliberately skips `check_bounds()` because a person clicking once
+# to inspect a real Razorpay object is not the runaway-cost risk the bounds were
+# built for. `/remind-now` is the OPPOSITE: it sends a real message to a
+# (notional) debtor, so it competes for that debtor's real weekly touch budget
+# and is refusable by exactly the same bound an autonomous nudge is. It calls
+# `Ledger.manual_reminder()`, which runs `_gate()` at click time and can hand
+# back `{"blocked": true, "block_reason": ...}` — the same 200-with-a-refusal
+# shape `approve_held` established in P9, so the dashboard reuses one UI for
+# "the guardrail said no" instead of inventing a second.
+#
+# REAL vs SIMULATED, stated in the payload and not only in a comment:
+#   REAL      the generated MP3 (gTTS, playable) and the SMS text.
+#   SIMULATED the delivery. No phone is dialled, no handset is reached — there
+#             is no telephony/SMS credential in this project. Every record
+#             carries `dial_status` / `send_status` saying exactly that.
+# ---------------------------------------------------------------------------
+
+
+class RemindNowIn(BaseModel):
+    """`channel` is the only thing the operator chooses about HOW it is sent.
+    There is deliberately no `stage` field: `stage` is an input to
+    `check_bounds()`, and a route that could pass `stage="legal"` would be a
+    door onto legal communication the agent must never send (CLAUDE.md law 4).
+    `custom_text` is content only — it is spoken/sent verbatim and is never
+    parsed for an amount, a date, or anything else that could move state."""
+
+    channel: Literal["voice", "sms"]
+    custom_text: str | None = None
+
+
+@app.post("/entities/{entity_id}/remind-now")
+def remind_now(entity_id: str, body: RemindNowIn) -> dict:
+    """Send a real voice or SMS reminder now — if the bounds allow it.
+
+    Returns the same `{action, blocked, block_reason}` shape as the approve
+    route. A refusal is HTTP 200 with `blocked: true`, not a 4xx: the request
+    was valid and the system did exactly what it should — a stopping rule
+    stopped it (P9 decision #7, same reasoning).
+    """
+    try:
+        outcome = ledger.manual_reminder(
+            entity_id, body.channel, runner.now(), body.custom_text
+        )
+    except ReviewQueueError as exc:
+        raise _review_error(exc) from exc
+
+    action = outcome["action"]
+    record = None
+    if action is not None:
+        runner.dispatch_action(action)
+        record = next(
+            (r for r in reversed(runner.reminders) if r["action_id"] == action.id), None
+        )
+    return {
+        "entity_id": entity_id,
+        "channel": body.channel,
+        "action": json.loads(action.model_dump_json()) if action else None,
+        "reminder": record,
+        "blocked": outcome["blocked"],
+        "block_reason": outcome["block_reason"],
+    }
+
+
+@app.get("/entities/{entity_id}/reminders")
+def get_reminders(entity_id: str) -> dict:
+    """Every reminder this entity has: the ones that went out, with their real
+    content, and the ones a bound refused.
+
+    Both halves come from stored values, not a re-derivation. Sent reminders are
+    `runner.reminders`, written at dispatch time. Blocked ones are read out of
+    `ledger.gate_log` — the append-only record of what `_gate()` actually saw at
+    the moment it refused — so the reason shown is the reason the system decided
+    from, never today's recomputation of it (CLAUDE.md law 8).
+    """
+    if entity_id not in ledger.entities and entity_id not in runner.threads:
+        raise HTTPException(status_code=404, detail="unknown entity")
+
+    sent = [
+        {**row, "status": "sent"}
+        for row in runner.reminders
+        if row["entity_id"] == entity_id
+    ]
+    blocked = [
+        {
+            "status": "blocked",
+            "entity_id": record.entity_id,
+            "channel": record.kind,
+            "manual": bool(record.params.get("manual")),
+            "text": record.params.get("custom_text"),
+            "block_reason": record.reason,
+            "ts": record.ts.isoformat(),
+            "checks": [json.loads(c.model_dump_json()) for c in record.checks],
+        }
+        for record in ledger.gate_log
+        if record.entity_id == entity_id
+        and record.kind in MANUAL_REMINDER_CHANNELS
+        and not record.allowed
+    ]
+    rows = sorted([*sent, *blocked], key=lambda r: r["ts"])
+    return {
+        "entity_id": entity_id,
+        "day": runner.day,
+        "audio_url_prefix": VOICE_NOTE_URL_PREFIX,
+        "real_tts": runner.real_tts,
+        "honesty": {
+            "real": "the generated MP3 audio and the SMS text — both genuine content a human can play or read",
+            "simulated": (
+                "the delivery. No phone is dialled and no handset receives an SMS: this project "
+                "holds no telephony or SMS-gateway credential. Every record below says so in its "
+                "dial_status / send_status field."
+            ),
+        },
+        "reminders": rows,
+        "counts": {"sent": len(sent), "blocked": len(blocked)},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Demo Console (packet P13) — "Create Mandate Now"
+#
+# This is NOT an agent decision and does not pretend to be one. Every other
+# money-moving path in this file (`/advance`, `/events`, the review-queue
+# approve/reject routes) exists to let a HUMAN supervise what the AGENT
+# decided — the Action always came from `ledger.process_event` /
+# `ledger.approve_held` / `ledger.reject_held`, gated by `check_bounds()`
+# before this module ever sees it. The route below is the opposite shape: a
+# human picks an entity and clicks a button to watch a REAL Razorpay
+# TEST-mode mandate get created immediately, for inspection. It never calls
+# `ledger.process_event`, `check_bounds()`, or `Ledger._gate()` — those exist
+# to bound what the agent decides across an automated 45-virtual-day run, and
+# a person deliberately clicking once is not the runaway-cost risk that
+# machinery was built to prevent (CLAUDE.md law 4's bounds are about the
+# agent's own decisions, not a human's explicit one-off click).
+#
+# It still audits before returning anything to the caller (CLAUDE.md law 3
+# applies to every action regardless of who triggered it) via
+# `runner.audit_manual()`, and the summary always starts "manual demo:" so it
+# can never be mistaken in the trail for "mandate_offer" or any other string
+# this codebase uses for something the agent itself decided.
+# ---------------------------------------------------------------------------
+
+
+class CreateMandateNowIn(BaseModel):
+    """All fields optional. Omitted customer fields fall back to the exact
+    synthetic, non-routable demo contact `WorldRunner._real_razorpay_call`
+    already uses elsewhere in this codebase (`DEMO_CUSTOMER_CONTACT` /
+    `DEMO_CUSTOMER_EMAIL`) — never a second, different fake-data convention.
+    There is deliberately no amount field: the amount always comes from the
+    invoice record (CLAUDE.md law 2), so nothing in this request body can
+    ever override it."""
+
+    customer_name: str | None = None
+    customer_contact: str | None = None
+    customer_email: str | None = None
+    debit_date: str | None = None
+
+
+@app.post("/entities/{entity_id}/create-mandate-now")
+def create_mandate_now(entity_id: str, body: CreateMandateNowIn | None = None) -> dict:
+    """The Demo Console's one button: create a REAL Razorpay TEST-mode
+    mandate registration for `entity_id` right now, via
+    `create_mandate_via_subscription` (packet P12's primary, live-verified
+    mandate rail — see `engine/action/razorpay_client.py`).
+
+    The amount and description are copied verbatim from `runner.invoices`
+    (never invented, never taken from the request body — CLAUDE.md law 2).
+    `debit_date` defaults to the invoice's real due date when omitted. Any
+    omitted customer field falls back to the same synthetic demo contact used
+    everywhere else in this codebase.
+
+    A `RazorpayError` (missing/invalid `.env` keys, a real API rejection) is
+    audited as a failed attempt and surfaces here as a clean 502 carrying
+    Razorpay's own error description — never a stack trace, and never a
+    fabricated `short_url`. A malformed `debit_date` is a 422 before any
+    network call is attempted.
+    """
+    invoice = runner.invoices.get(entity_id)
+    if invoice is None:
+        raise HTTPException(status_code=404, detail="unknown entity (no invoice on record for it)")
+
+    body = body or CreateMandateNowIn()
+    debtor = DEBTOR_BY_ID.get(invoice.debtor_id, {})
+    customer = {
+        "name": body.customer_name or debtor.get("name", entity_id),
+        "contact": body.customer_contact or DEMO_CUSTOMER_CONTACT,
+        "email": body.customer_email or DEMO_CUSTOMER_EMAIL,
+    }
+    debit_date = body.debit_date or invoice.due.isoformat()
+    try:
+        dt.datetime.strptime(debit_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"debit_date must be 'YYYY-MM-DD', got {debit_date!r}"
+        ) from exc
+
+    description = f"Promise Keeper demo console mandate for {entity_id}"
+
+    # The Razorpay call has to happen before we have a plan_id/subscription_id/
+    # short_url to put in the audit entry — there is no way to log ids that
+    # don't exist yet. What CLAUDE.md law 3 protects is honoured here the same
+    # way `WorldRunner._real_razorpay_call` already honours it for every other
+    # real Razorpay call in this codebase: the audit write happens the instant
+    # a result (success OR failure) exists, synchronously, before this route
+    # returns anything to the caller — no path out of this function returns a
+    # response without an audit entry for it already appended.
+    try:
+        result = razorpay_client.create_mandate_via_subscription(
+            invoice.amount_inr, description, customer, debit_date,
+        )
+    except RazorpayError as exc:
+        runner.audit_manual(
+            entity_id,
+            "manual demo: mandate creation FAILED (operator-triggered, no mandate was created)",
+            {
+                "amount_inr": invoice.amount_inr, "description": description,
+                "customer": customer, "debit_date": debit_date,
+                "error": str(exc), "razorpay_status_code": exc.status_code,
+                "razorpay_description": exc.description,
+            },
+        )
+        raise HTTPException(status_code=502, detail=exc.description or str(exc)) from exc
+
+    plan = result["plan"]
+    subscription = result["subscription"]
+    runner.audit_manual(
+        entity_id,
+        "manual demo: mandate created by operator",
+        {
+            "amount_inr": invoice.amount_inr, "description": description,
+            "customer": customer, "debit_date": debit_date,
+            "plan_id": plan.get("id"), "subscription_id": subscription.get("id"),
+            "short_url": subscription.get("short_url"), "razorpay_mode": "test",
+        },
+    )
+    return {"plan": plan, "subscription": subscription, "customer_used": customer}
 
 
 @app.get("/trust")

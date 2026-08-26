@@ -13,15 +13,16 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from engine.schemas import Action
+from engine.schemas import Action, MessageChannel
 
-Rail = Literal["wa_native_payment", "mandate_link", "plain_link", "voice_note", "text_only"]
+Rail = Literal["wa_native_payment", "mandate_link", "plain_link", "voice_note", "sms_text", "text_only"]
 DeliveryStatus = Literal["queued", "sent", "delivered", "failed"]
 
 _DEFAULT_RAIL_FOR_KIND: dict[str, Rail] = {
     "mandate_offer": "mandate_link",
     "link": "plain_link",
     "voice": "voice_note",
+    "sms": "sms_text",
     "message": "text_only",
 }
 
@@ -30,7 +31,10 @@ class QueuedMessage(BaseModel):
     id: str
     action_id: str
     entity_id: str
-    channel: Literal["wa", "email"]
+    channel: MessageChannel
+    """`wa` / `email` / `sms` (packet P14). The channel literal is the one in
+    `engine/schemas.py` rather than a copy, so a channel can never exist here
+    that the rest of the system does not know about."""
     rail: Rail
     text: str
     status: DeliveryStatus = "queued"
@@ -42,7 +46,7 @@ class Messenger:
         self.queue: list[QueuedMessage] = []
         self._n = 0
 
-    def send(self, action: Action, channel: Literal["wa", "email"], text: str, rail: Rail | None = None) -> QueuedMessage:
+    def send(self, action: Action, channel: MessageChannel, text: str, rail: Rail | None = None) -> QueuedMessage:
         self._n += 1
         resolved_rail = rail or _DEFAULT_RAIL_FOR_KIND.get(action.kind, "text_only")
         msg = QueuedMessage(

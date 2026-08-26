@@ -53,7 +53,7 @@ manual event injection in tests and demos.
 """
 
 import datetime as dt
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -87,7 +87,21 @@ _OUTREACH_ACTION: dict[str, tuple[str, dict]] = {
     "ESCALATE_2": ("message", {"stage": "firm"}),
 }
 
-TOUCH_COUNTED_KINDS = {"link", "mandate_offer", "message", "voice"}
+TOUCH_COUNTED_KINDS = {"link", "mandate_offer", "message", "voice", "sms"}
+
+MANUAL_REMINDER_CHANNELS = ("voice", "sms")
+"""The two kinds `manual_reminder()` will send (packet P14). Both are ordinary
+outbound kinds in `state_machine.OUTBOUND_KINDS` and both are touch-counted
+above — a merchant clicking "Send SMS reminder" spends the SAME weekly budget an
+autonomous nudge would, and can be refused by the SAME bound. See
+`manual_reminder()` for why that is not negotiable."""
+
+MANUAL_REMINDER_STAGE = "firm"
+"""The stage a manual reminder is sent at. Fixed here rather than accepted from
+the caller, because `stage` is an input to `check_bounds()` — a route that could
+choose its own stage could choose `"legal"`, and the agent never sends legal
+communication (CLAUDE.md law 4). The operator picks the CHANNEL and may supply
+their own words; they do not pick the escalation stage."""
 
 # ---------------------------------------------------------------------------
 # CONFIDENCE GATES (master doc §2.3) — deliberately NOT in state_machine.py.
@@ -739,6 +753,82 @@ class Ledger:
         held.resolved_ts = now
         held.resolution_note = note or "merchant handled this outside the system; the agent sent nothing"
         return held
+
+    def manual_reminder(
+        self,
+        entity_id: str,
+        channel: Literal["voice", "sms"],
+        now: dt.datetime,
+        custom_text: str | None = None,
+    ) -> dict:
+        """THE OPERATOR-TRIGGERED REMINDER (packet P14). Returns
+        `{"action", "blocked", "block_reason"}` — the same shape `approve_held`
+        returns, so the dashboard renders a refusal here with the same UI it
+        already uses for a stale approval.
+
+        THIS IS NOT A DEMO CONSOLE, AND THE DIFFERENCE IS THE POINT.
+        `check_bounds()` runs here, at click time, against the debtor's touch
+        budget as of the click — exactly as it does for `approve_held`. A manual
+        reminder competes for the SAME `MAX_TOUCHES_PER_WEEK` budget an
+        autonomous nudge does, because the bound protects the human being
+        contacted and that human cannot tell whether the third message this week
+        was decided by a ladder or by a merchant with a mouse. A channel that
+        could be spent by hand for free would be a hole in bound #4, not a
+        feature. So: a click that would exceed the cap comes back
+        `blocked: True`, audited, with nothing sent.
+
+        Everything else on the path is unchanged and shared, deliberately:
+          * `_gate()` is the same chokepoint (so the merchant kill-switch, the
+            terminal-state stop and the legal-stage refusal all apply),
+          * the touch is recorded through `_record_touch` like any other,
+          * the Action is built by `_emit_action`, audited before it is
+            returned, carrying `bounds_checked=True`.
+
+        The AUTONOMOUS path is untouched by this method. `_ESCALATE_ACTION`
+        already maps `ESCALATE_2 -> ("voice", {"stage": "firm"})` and still
+        reaches the wire through `_decide_action` -> `_try_action` -> `_gate`.
+        P14 changed what a `voice` action PRODUCES downstream (real generated
+        audio), not when the agent decides to make one.
+
+        `custom_text` is the operator's own words, and it is content only: it is
+        carried in `params` for the dispatch layer to speak/send, and it is
+        never read by `check_bounds()`, never parsed for an amount or a date,
+        and cannot influence a state transition. The stage is fixed
+        (`MANUAL_REMINDER_STAGE`) rather than accepted from the caller.
+        """
+        if channel not in MANUAL_REMINDER_CHANNELS:
+            raise ReviewQueueError(
+                f"channel must be one of {list(MANUAL_REMINDER_CHANNELS)}", 422
+            )
+        entity = self.entities.get(entity_id)
+        if entity is None:
+            raise ReviewQueueError(f"unknown entity {entity_id}", 404)
+
+        params: dict[str, Any] = {"stage": MANUAL_REMINDER_STAGE, "manual": True}
+        if custom_text:
+            params["custom_text"] = custom_text
+
+        self._audit(
+            entity_id, "judgment", f"merchant requested a manual {channel} reminder",
+            {"channel": channel, "params": dict(params),
+             "note": "operator-triggered; check_bounds runs at click time exactly as it does "
+                     "for an autonomous nudge — this does not bypass the touch cap",
+             "debtor_id": self._debtor_id(entity_id)}, now,
+        )
+
+        gate = self._gate(entity, channel, params, now)
+        if not gate.allowed:
+            self._audit(
+                entity_id, "sentinel", f"manual {channel} reminder blocked at click time",
+                {"channel": channel, "reason": gate.reason}, now,
+            )
+            return {"action": None, "blocked": True, "block_reason": gate.reason}
+
+        self._record_touch(entity, now)
+        action = self._emit_action(
+            entity, channel, params, f"manual {channel} reminder requested by the merchant", now,
+        )
+        return {"action": action, "blocked": False, "block_reason": None}
 
     def resolve_handoff(self, entity_id: str, resolution: str, now: dt.datetime) -> EntityState:
         """Close an open handoff/dispute. The ONLY producer of

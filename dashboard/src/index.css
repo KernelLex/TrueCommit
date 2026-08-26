@@ -18,6 +18,8 @@
   --danger: #f87171;
   --danger-soft: rgba(248, 113, 113, 0.14);
   --muted-strong: #94a3b8;
+  --demo: #e879f9;
+  --demo-soft: rgba(232, 121, 249, 0.14);
 
   --mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
   --sans: 'Segoe UI', system-ui, Roboto, Arial, sans-serif;

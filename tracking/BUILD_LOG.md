@@ -6,6 +6,58 @@ Real bugs, dead ends, and surprises hit during the build. Every entry: date · w
 
 ## Entries
 
+### 2026-08-26 — dispatched P13 and P14 concurrently into the same working directory with no isolation
+**What happened:** P13 (demo console) and P14 (SMS/voice reminders) were dispatched as parallel background packets, as every other Sonnet/Opus pair this session has been. Unlike every prior pair, neither packet's file list was checked against the other's before dispatch, and neither was given a separate git worktree — every packet up to now happened to touch disjoint files, so this had never mattered. It should have been checked here: P13's own report named `engine/integration/runner.py` as a file it would touch, and P14 also needed `runner.py` for the voice/SMS dispatch branches. Two agents were writing to the same file on disk, unsynchronized, for the ~7 minutes both were active.
+
+**Root cause:** I treated "runs in parallel" as safe by default because it always had been, rather than checking file-list overlap before dispatch — the one step that actually determines whether concurrent packets are safe without worktree isolation.
+
+**What it cost, measured rather than assumed:** nothing, on inspection — I read every hunk of the final `runner.py` diff by hand before merging and P13's `audit_manual()` addition and P14's `_dispatch_voice`/`_dispatch_sms` machinery landed as cleanly separated, non-interleaved hunks (see the reviewed diff in this commit). `pytest` was green at 486 both before and after reconciling. But that is luck in the ordering of two agents' edits, not a property the setup guaranteed — a real collision (both agents editing the same function, or one agent's mid-write file caught by the other's read) was fully possible and would have been hard to distinguish from a genuine code bug during review.
+
+**Fix:** none needed to either packet's actual code. The process gets the fix: before dispatching two packets concurrently, diff their stated file lists first. Overlapping files get either sequenced dispatch (one merges before the other starts) or `isolation: "worktree"` so each agent edits its own copy and the merge conflict — if any — is visible as an actual git conflict instead of a silent race on disk.
+
+**Design change:** none to the product. Added to this file because "what broke" in a project like this includes the build process itself, not only the code it produces — and a race that happened to not collide is still a real risk that was taken, not a non-event.
+
+### 2026-08-26 — gTTS live-verified: the voice notes are real audio, and they are network-dependent
+**What I checked, before writing any of P14:** whether gTTS actually produces a playable MP3 in this environment, rather than trusting that a package installs. Ran it directly against the real reminder copy:
+
+```
+gTTS(text="INV-001 ka Rs.40,000 abhi tak pending hai, please clear kara dijiye.", lang="hi").save(...)
+-> 61,632 bytes, first four bytes ff f3 84 c4  (MPEG-1 Layer III frame sync)
+```
+
+Then again end-to-end through the API once the feature was built, which is the version that matters: `POST /entities/INV-084/remind-now {"channel":"voice"}` → **50,112-byte MP3 at `demo_assets/voice_notes/INV-084-A-0032.mp3`**, fetched back from the FastAPI static mount as `200 audio/mpeg`, 50,112 bytes, same `ff f3` header. gTTS 2.5.4, no credential of any kind, free.
+
+**The caveats, said out loud because they matter to anyone running this repo:**
+- **It needs the internet.** gTTS is a thin client over a public Google endpoint. Offline, generation raises and the reminder falls back to `audio_generation: "failed"` + the transcript. That path is tested (`test_a_voice_reminder_survives_a_tts_outage_as_a_transcript`), so a network hiccup costs the audio and nothing else.
+- **It is not versioned.** There is no model id to pin and Google can change the voice underneath us, so the audio is real but not byte-reproducible across time. That is why the *filename* is deterministic (`<entity>-<action>.mp3`, no uuid) and the *bytes* are not claimed to be.
+- **What is real and what is not:** the audio is genuinely generated and genuinely playable. Nothing dials a phone — there is no telephony credential in this project, and every record says `dial_status: "simulated_no_telephony_provider"`. Same for SMS: real text, no gateway, `send_status: "simulated_no_sms_provider"`.
+
+### 2026-08-26 — the new voice channel is blocked 4 out of 4 times by the touch cap, and that is the honest headline
+**What I expected:** building P14's reminder subsystem, I assumed the 45-day run would start emitting voice notes at ESCALATE_2 — `_ESCALATE_ACTION["ESCALATE_2"]` has mapped to `("voice", {"stage":"firm"})` since Day 5, so upgrading what a `voice` action produces should have produced a pile of MP3s. My first worry was the opposite of a bug: ~20 gTTS network calls inside `pytest`, making the suite slow and flaky.
+
+**What actually happened:** the seeded 45-day run generates **zero** voice notes. Measured, rather than assumed:
+
+```
+voice actions emitted:            0
+voice gate records:               4   (all allowed=False)
+reason, all four:                 "max_touches_per_week (2) exceeded across this debtor's entities"
+```
+
+**Root cause — not a bug, the bound doing its job.** An entity only reaches ESCALATE_2 by breaking a promise it made *after* being chased, and both of those beats already spent touches from the debtor's weekly budget. By the time the ladder wants to make a call, there is nothing left to spend. This is the same shape as the P9 finding two entries down (the approve button being useless to an eager merchant) and it has the same resolution: the guardrail is genuinely load-bearing on the new channel, not decorative.
+
+**Fix:** none to the gate. Three things came out of it instead:
+- **The test-suite worry evaporated on its own** — zero voice actions means zero network calls from `pytest tests/`, without needing to be told. I still added `PK_REAL_TTS=0` as an explicit opt-out for air-gapped/CI runs, recording `audio_generation: "disabled"` (deliberately not `"failed"` — "we chose not to call" and "we called and it broke" are different facts).
+- **The demo path is now stated correctly.** Real audio comes from the operator's `remind-now` button or from an entity whose debtor still has budget — *not* from the 45-day autopilot. Claiming "advance the clock and hear the agent call people" would have been a demo that does not happen. This is a real limitation of the feature as built and it is in DECISIONS.md rather than hidden.
+- **It became the best available proof that the manual path is gated too.** The four refusals are visible in the dashboard's Reminders panel as blocked rows with the bound's own reason, in the same visual language P9's blocked approvals use.
+
+**Design change:** none to any bound. It did settle the `remind-now`-vs-demo-console question with evidence rather than argument: on a channel where the ladder itself is refused 4 times out of 4, a manual button that skipped the cap would obviously have been a hole rather than a convenience.
+
+### 2026-08-26 — `Path.relative_to()` raises rather than returning None, and it took the voice tests down
+**What broke:** three P14 tests failed with `ValueError: '...\\pytest-of-amogh\\...\\INV-001-A-0001.mp3' is not in the subpath of '...\\razzerpay'`, from `_dispatch_voice` writing `"audio_file": str(path.relative_to(ROOT))` into the audit detail.
+**Root cause:** the tests redirect `tts.VOICE_NOTE_DIR` into pytest's `tmp_path` so the real `generate_voice_note` runs without littering the repo. `Path.relative_to()` does not degrade gracefully when the two paths share no root — it raises. I had written it as if it returned the absolute path (or None) in that case. In production the directory *is* inside the repo, so this would have sat undetected until the first deployment that pointed the asset root elsewhere.
+**Fix:** `_repo_relative()` in `runner.py` — try the relative form, fall back to the absolute path on `ValueError`, forward-slash either way. The fallback is documented as a real case (a redirected asset root), not defensive padding.
+**Design change:** small but worth keeping — audit-trail fields that *describe* a path should never be able to take down the action that produced the path. The audit entry exists to record what happened; a formatting helper inside it must not be the thing that fails.
+
 ### 2026-08-26 — the approve button was useless to an eager merchant, and that turned out to be the bound working
 **What broke:** first end-to-end run of the P9 review queue against the real 45-day world. Clicking "Approve" on every held money action the moment it appeared produced **0 sends and 3 blocks** — every single approval was refused by `max_touches_per_week`. My first read was that the hold path had a bug: `_decide_money_action` only ever holds a candidate that has just PASSED a bounds preview, so how could the very next click fail the same check?
 

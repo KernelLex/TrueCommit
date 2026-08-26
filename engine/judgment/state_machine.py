@@ -75,12 +75,19 @@ Blast radius is contained by construction, not by convention:
 
 HUMAN_RESOLUTIONS: dict[str, State] = {"recovered": "KEPT", "written_off": "CLEAN_LOSS"}
 
-TouchKind = Literal["link", "mandate_offer", "message", "voice"]
+TouchKind = Literal["link", "mandate_offer", "message", "voice", "sms"]
 # Actions that go TO the debtor/customer and are what "no further outbound
 # actions" (BUILD.md Day-5 dispute test) means to block. evidence_packet /
 # human_handoff are the terminal-state's own resolution artifacts, not
 # further outreach, so they're exempt from the terminal-state block below.
-OUTBOUND_KINDS = {"message", "link", "mandate_offer", "mandate_execute", "voice"}
+#
+# `sms` joined both sets in packet P14. NO NEW BOUND CONSTANT WAS ADDED for it
+# and none was weakened: an SMS is an outbound contact like any other, so it
+# rides MAX_TOUCHES_PER_WEEK, the terminal-state stop and the legal-stage
+# refusal on exactly the same terms as `message`/`voice`/`link`. That is the
+# whole reason it is added to these sets rather than given a channel budget of
+# its own — a new channel with its own allowance would be a way around bound #4.
+OUTBOUND_KINDS = {"message", "link", "mandate_offer", "mandate_execute", "voice", "sms"}
 
 
 class EntityState(BaseModel):
@@ -159,7 +166,7 @@ def check_bounds(
     if action_kind == "mandate_execute" and entity.retry_count > RETRY_ON_EXECUTION_FAILURE:
         return BoundsResult(allowed=False, reason=f"retry_on_execution_failure ({RETRY_ON_EXECUTION_FAILURE}) exceeded, falls to link/ladder/human")
 
-    if action_kind in ("message", "link", "mandate_offer", "voice"):
+    if action_kind in ("message", "link", "mandate_offer", "voice", "sms"):
         if params.get("stage") == "legal":
             return BoundsResult(allowed=False, reason="legal-stage notices go to the merchant for review; the agent never sends legal communication itself")
         window = entity.touches if debtor_touches is None else debtor_touches
@@ -293,7 +300,7 @@ def check_bounds_detailed(
             ),
         ))
 
-    if action_kind in ("message", "link", "mandate_offer", "voice"):
+    if action_kind in ("message", "link", "mandate_offer", "voice", "sms"):
         stage = params.get("stage")
         checks.append(BoundsCheck(
             name="legal_stage_goes_to_merchant",

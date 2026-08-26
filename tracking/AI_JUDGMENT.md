@@ -37,6 +37,20 @@ Three things worth saying out loud about where the LLM's number is and is not tr
 - **The default is now NOT an LLM.** Perception's default backend is the rules provider — see (b) row 7. An LLM is opt-in, per call, and is the only thing in the system that costs money to run.
 - **Every accuracy claim is now per provider and has a baseline.** `metrics/extraction_accuracy_{provider}.json` / `metrics/triage_accuracy_{provider}.json`. "Extraction is X% accurate" is a weak claim on its own; "X% vs a rules baseline of 97.7% in-sample" says whether the LLM is earning its cost. Both evals refuse `--provider oracle` (ground-truth replay) so no circular number can enter `metrics/`.
 
+**Update 2026-08-26 (packet P14 — a SECOND AI system enters the repo, and it is not an LLM).** Listing it here because "we used AI" has to mean every AI, not only the interesting ones.
+
+| # | Model / call | File | Why an AI here | Settings | Confidence gate |
+|---|---|---|---|---|---|
+| 7 | **Text-to-speech for voice reminders — `gTTS`** (Google Translate TTS, free, no credential) | `engine/action/tts.py`, called from `WorldRunner._dispatch_voice` | The reminder is a *voice* note in Hinglish. Recording a human is not reproducible and a pre-generated static MP3 can only ever say one amount for one invoice; TTS is the only way the audio can quote the ledger's real number for the entity actually being chased. | `lang="hi"` (Hinglish reads naturally in the Hindi voice), deterministic filename from `entity_id`+`action_id`, opt-out via `PK_REAL_TTS=0` | n/a — there is nothing to gate. It emits no decision, no score and no structured field; its only output is audio bytes. |
+
+**This is SPEAK-only, and the narrowest SPEAK in the system.** By the time gTTS runs, the sentence is already fully determined: `check_bounds()` has passed, the Action has been audited, and the text is either the ledger's own template interpolated with the ledger's own amount, or a sentence the human operator typed. TTS chooses no words, no amount, no date, no recipient and no timing — it converts a finished string into audio. It runs strictly *after* the gate, so it cannot influence a state transition even in principle; the worst it can do is fail, in which case the reminder still exists as its transcript (`audio_generation: "failed"`) and nothing else changes. It is also the one AI in the repo whose output is never read back by any code — no branch anywhere reads the MP3.
+
+Two things it deliberately does NOT do, both of which were available and rejected:
+- **No language detection.** The obvious "improvement" is to detect Hindi vs English per sentence and switch voices. That would be a second model making a choice about content, and it would make the same input produce different audio on different days — a determinism regression (law 6) bought for nothing a listener would notice.
+- **No LLM-generated copy.** The reminder script is a template in `runner.py` next to `ESCALATION_TEXT`, not a model-written sentence. See (b) row 12.
+
+**Model-card honesty:** gTTS is a thin client over a public Google endpoint. It needs the internet, it is not versioned or pinned to a model id, and Google can change the voice underneath us — so the audio is real but not reproducible byte-for-byte across time, only path-for-path. That is why the *filename* is deterministic and the *bytes* are not claimed to be. Live-verified working 2026-08-26 (see BUILD_LOG).
+
 ---
 
 ## (b) Every place we deliberately do NOT use AI
@@ -56,6 +70,9 @@ Per master doc §2.2 — say this list out loud in the video:
 10. **Closing a handoff** — `human_resolution` (recovered / written off) is a merchant's statement of fact, never inferred. It does not move the trust posterior either: an admin click is bookkeeping about our process, not evidence about the debtor. ✅ packet P9, 2026-08-26.
 
 11. **The Day Story narration** — the judge-facing screen that shows what happened on a simulated day writes no prose of its own. Every sentence on it is an audit `summary`, a `reason` string, or a message the run genuinely sent or received; every number is a stored value (`Ledger.audit`, `Ledger.gate_log`, `WorldRunner.threads`, `WorldRunner.day_snapshots`, `DEBTOR_BY_ID`). An LLM summariser here would have been the single easiest place in the repo to launder a fabrication into something that looks like evidence — a plausible paragraph beside a real amount. Where the data does not exist the API returns `null` plus a note saying why (a Scene-2 cart customer has no stored business name; a debtor with no posterior yet has no trust mean), and the screen prints that note. ✅ packet P10, 2026-08-26 (`engine/integration/day_story.py`, `dashboard/src/screens/DayStoryScreen.jsx`, `tests/test_day_story.py`).
+
+12. **The reminder script itself** — the words a voice note speaks and an SMS carries are a template in `engine/integration/runner.py` (`VOICE_TEXT` / `SMS_TEXT`, sitting next to `ESCALATION_TEXT`) interpolated with the LEDGER's amount, or a sentence the human operator typed into the box. No model writes them. gTTS is handed a finished string and only turns it into audio (see (a) row 7). Operator `custom_text` is used verbatim and is never parsed for an amount or a date — a sentence typed into a UI is content, never an instruction to the state machine. ✅ packet P14, 2026-08-26.
+13. **Whether a reminder may be sent at all** — `check_bounds()`, on both the autonomous and the operator path. There is no "the merchant really wants this one" override, and the new `sms` channel got no budget of its own: it rides `MAX_TOUCHES_PER_WEEK` exactly like `message`/`voice`/`link`, proven by a 2,000-input equivalence test against `message`. In the seeded 45-day run the autonomous voice escalation is refused all 4 times it is attempted — the bound is load-bearing on this channel, not decorative. ✅ packet P14, 2026-08-26.
 
 **The design law: the LLM can SEE and SPEAK, never SPEND.** Worst-case LLM hallucination = an awkward message, never a wrong debit. That's the blast-radius answer if asked.
 

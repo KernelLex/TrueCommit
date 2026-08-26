@@ -102,6 +102,34 @@ export const api = {
     }),
   pauseEntity: (entityId) => request(`/entities/${encodeURIComponent(entityId)}/pause`, { method: 'POST' }),
   unpauseEntity: (entityId) => request(`/entities/${encodeURIComponent(entityId)}/unpause`, { method: 'POST' }),
+
+  // ---- Packet P13: Demo Console ------------------------------------------
+  // NOT an agent action — a human operator's one-click button that creates a
+  // REAL Razorpay TEST-mode mandate registration immediately, for
+  // inspection. Never goes through the funnel/gate machinery the time-warp
+  // clock uses. `body` is `{customer_name?, customer_contact?, customer_email?,
+  // debit_date?}`, all optional — see api/main.py's CreateMandateNowIn.
+  createMandateNow: (entityId, body) =>
+    request(`/entities/${encodeURIComponent(entityId)}/create-mandate-now`, {
+      method: 'POST',
+      body: JSON.stringify(body || {}),
+    }),
+
+  // ---- Packet P14: real voice + SMS reminders ----------------------------
+  // The OPPOSITE shape to the Demo Console above, and the difference matters.
+  // `remindNow` sends a real message to a debtor, so it spends that debtor's
+  // real weekly touch budget and the ledger can refuse it: like `approveHeld`,
+  // it resolves with { blocked: true, block_reason } on an HTTP 200 rather than
+  // throwing, and the UI has to render that refusal instead of assuming the
+  // click worked. Audio URLs come back as `/voice-notes/<file>.mp3`; prefix
+  // them with `/api` (see VOICE_NOTE_SRC in EntityTimelineScreen) to play them
+  // through the dev proxy.
+  remindNow: (entityId, channel, customText) =>
+    request(`/entities/${encodeURIComponent(entityId)}/remind-now`, {
+      method: 'POST',
+      body: JSON.stringify({ channel, custom_text: customText || null }),
+    }),
+  reminders: (entityId) => request(`/entities/${encodeURIComponent(entityId)}/reminders`),
 }
 
 export { ApiError }

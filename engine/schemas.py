@@ -38,11 +38,20 @@ InvoiceCauseType = Literal[
 InvoiceStatus = Literal["open", "overdue", "paid", "disputed", "closed"]
 PromiseStatus = Literal["pending", "kept", "broken", "at_risk", "renegotiated", "disputed"]
 MessageDirection = Literal["in", "out"]
-MessageChannel = Literal["wa", "email"]
+MessageChannel = Literal["wa", "email", "sms"]
+"""`sms` added in packet P14 (the reminder subsystem). It is a real CHANNEL —
+the text that rides it is genuinely generated — but no SMS gateway credential
+exists in this project, so every dispatched SMS record carries
+`send_status: "simulated_no_sms_provider"`. See engine/action/tts.py."""
+
 ActionKind = Literal[
     "link", "mandate_offer", "mandate_execute", "message", "voice",
-    "evidence_packet", "human_handoff",
+    "sms", "evidence_packet", "human_handoff",
 ]
+"""`sms` is a new outbound KIND (packet P14) and rides the same touch cap as
+every other outbound kind. Calls stay under `voice`: P14 upgraded what a
+`voice` action PRODUCES (a real gTTS-generated MP3 instead of a text line on a
+"voice_note" rail), it did not rename or split the kind."""
 AuditLayer = Literal["perception", "judgment", "action", "sentinel", "auditor"]
 
 

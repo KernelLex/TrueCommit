@@ -1377,3 +1377,130 @@
     grid-column: 2;
   }
 }
+
+/* ---------- Demo Console (packet P13) ----------
+   Deliberately a different accent (fuchsia, --demo below) from everything
+   else on screen: --accent/--good/--warn/--danger are all already spoken for
+   by agent-decision UI (judgment badges, approve/reject, guardrail states).
+   This panel must never be mistaken for one of those at a glance. */
+
+.demo-console {
+  border-color: rgba(232, 121, 249, 0.35);
+  background: linear-gradient(180deg, rgba(232, 121, 249, 0.06), var(--bg-panel) 60%);
+}
+
+.demo-console-head {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.demo-console-head h2 {
+  margin: 0;
+}
+
+.demo-console-badge {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--demo);
+  background: var(--demo-soft);
+  border: 1px solid rgba(232, 121, 249, 0.45);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+}
+
+.demo-console-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.9rem 1rem;
+  align-items: start;
+  margin-top: 0.5rem;
+}
+
+.demo-console-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.demo-console-field select,
+.demo-console-field input {
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+.demo-console-field input::placeholder {
+  color: var(--text-faint);
+  font-size: 0.82rem;
+}
+
+.demo-console-hint {
+  color: var(--text-faint);
+  font-size: 0.74rem;
+}
+
+.btn-demo-console {
+  align-self: end;
+  border-color: rgba(232, 121, 249, 0.5);
+  color: var(--demo);
+  background: var(--demo-soft);
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding: 0.55rem 1.1rem;
+}
+
+.btn-demo-console:hover:not(:disabled) {
+  background: rgba(232, 121, 249, 0.22);
+}
+
+.demo-console-result {
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border-soft);
+  font-size: 0.88rem;
+}
+
+.demo-console-result a {
+  color: var(--demo);
+  overflow-wrap: anywhere;
+}
+
+.demo-console-ids {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 0.4rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+/* ---- Packet P14: reminders (voice + SMS) ---------------------------------
+   Deliberately minimal. The panel reuses the Human-Review screen's existing
+   .review-item / .review-warn / .btn language so a blocked reminder LOOKS like
+   the blocked approval it is — a second visual vocabulary for the same
+   guardrail would teach a judge there are two guardrails. */
+
+.reminder-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.reminder-audio {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  margin: 0.6rem 0;
+}
