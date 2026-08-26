@@ -6,3 +6,4 @@ httpx
 pytest
 python-dotenv
 pyyaml
+gTTS
