@@ -6,6 +6,7 @@ passed explicitly rather than read from .env, so this suite never touches
 the network and never needs real keys.
 """
 
+import datetime as dt
 import json
 
 import httpx
@@ -197,6 +198,172 @@ def test_mandate_registration_link_rejects_unknown_method():
         )
 
 
+# -- Subscriptions rail (packet P12: primary mandate path) --------------
+
+
+def test_create_plan_payload_shape():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        return _json_response(200, {"id": "plan_TESTPLAN123", "period": "monthly"})
+
+    client = _mock_client(handler)
+    result = client.create_plan(amount_inr=100, description="Promise Keeper one-time mandate")
+
+    assert captured["url"].endswith("/plans")
+    body = captured["body"]
+    # period:"monthly" is REQUIRED by Razorpay's plan schema even for a
+    # one-time debit -- it is schema plumbing, not real recurrence. See the
+    # method's docstring / module docstring for why this must stay.
+    assert body["period"] == "monthly"
+    assert body["interval"] == 1
+    assert body["item"]["amount"] == 10000  # Rs.100 -> paise
+    assert body["item"]["currency"] == "INR"
+    assert result["id"] == "plan_TESTPLAN123"
+
+
+def test_create_mandate_via_subscription_payload_shape():
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content) if request.content else {}
+        calls.append((str(request.url), body))
+        if request.url.path.endswith("/plans"):
+            return _json_response(200, {"id": "plan_TULfhYrG9rmMjR", "period": "monthly"})
+        return _json_response(200, {
+            "id": "sub_TULfqScOEmQ57p",
+            "short_url": "https://rzp.io/rzp/subtest",
+            "charge_at": body.get("start_at"),
+            "status": "created",
+        })
+
+    client = _mock_client(handler)
+    result = client.create_mandate_via_subscription(
+        amount_inr=40000,
+        description="INV-001 mandate",
+        customer={"name": "Acme Traders", "contact": "+919812345678", "email": "acme@example.com"},
+        debit_date="2026-09-01",
+    )
+
+    assert len(calls) == 2
+    plan_url, plan_body = calls[0]
+    sub_url, sub_body = calls[1]
+    assert plan_url.endswith("/plans")
+    assert plan_body["period"] == "monthly"  # required-but-irrelevant schema field, present
+    assert plan_body["item"]["amount"] == 4000000  # Rs.40,000 -> paise
+    assert sub_url.endswith("/subscriptions")
+    assert sub_body["plan_id"] == "plan_TULfhYrG9rmMjR"
+    assert sub_body["total_count"] == 1  # exactly one billing cycle -- the one-time-mandate semantics
+    assert sub_body["quantity"] == 1
+    assert sub_body["customer_notify"] == 1
+
+    # debit_date "2026-09-01" -> start_at unix seconds at midnight UTC,
+    # same conversion pattern as create_invoice's due_date -> expire_by.
+    expected_start_at = int(
+        dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc).timestamp()
+    )
+    assert sub_body["start_at"] == expected_start_at
+
+    assert sub_body["notes"]["customer_name"] == "Acme Traders"
+    assert result["plan"]["id"] == "plan_TULfhYrG9rmMjR"
+    assert result["subscription"]["id"] == "sub_TULfqScOEmQ57p"
+    assert result["subscription"]["short_url"] == "https://rzp.io/rzp/subtest"
+
+
+# -- check_mandate_execution (query, not command) ------------------------
+
+
+def test_check_mandate_execution_finds_a_captured_payment():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/invoices"):
+            assert request.url.params.get("subscription_id") == "sub_TULfqScOEmQ57p"
+            return _json_response(200, {
+                "items": [{"id": "inv_TEST1", "payment_id": "pay_TULmn2CWCOuWDu", "status": "paid"}]
+            })
+        assert request.url.path.endswith("/payments/pay_TULmn2CWCOuWDu")
+        return _json_response(200, {
+            "id": "pay_TULmn2CWCOuWDu",
+            "status": "captured",
+            "method": "emandate",
+            "token_id": "token_TULmXon2Xf7bco",
+        })
+
+    client = _mock_client(handler)
+    result = client.check_mandate_execution("sub_TULfqScOEmQ57p")
+
+    assert result["executed"] is True
+    assert result["checked_via"] == "invoice_lookup"
+    assert result["payment"]["status"] == "captured"
+    assert result["payment"]["token_id"] == "token_TULmXon2Xf7bco"
+
+
+def test_check_mandate_execution_reports_nothing_yet_honestly():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/invoices")
+        return _json_response(200, {"items": []})
+
+    client = _mock_client(handler)
+    result = client.check_mandate_execution("sub_TULfqScOEmQ57p")
+
+    assert result["executed"] is False
+    assert result["payment"] is None
+    assert result["checked_via"] == "invoice_lookup"
+
+
+def test_check_mandate_execution_ignores_subscription_status_lag():
+    # KNOWN QUIRK per BUILD_LOG: subscription.status lags the real payment
+    # record. This method never even looks at a subscription's own status,
+    # so an invoice with no payment_id yet (nothing captured) must report
+    # executed:False regardless of anything a subscription object might say.
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/invoices")
+        return _json_response(200, {"items": [{"id": "inv_TEST1", "payment_id": None, "status": "issued"}]})
+
+    client = _mock_client(handler)
+    result = client.check_mandate_execution("sub_TULfqScOEmQ57p")
+
+    assert result["executed"] is False
+    assert result["payment"] is None
+
+
+# -- revoke_mandate_token (real DELETE) -----------------------------------
+
+
+def test_revoke_mandate_token_success():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["method"] = request.method
+        captured["path"] = request.url.path
+        return _json_response(200, {"deleted": True})
+
+    client = _mock_client(handler)
+    result = client.revoke_mandate_token(customer_id="cust_TEST123", token_id="token_TULmXon2Xf7bco")
+
+    assert captured["method"] == "DELETE"
+    assert captured["path"].endswith("/customers/cust_TEST123/tokens/token_TULmXon2Xf7bco")
+    assert result["deleted"] is True
+
+
+def test_revoke_mandate_token_raises_on_nonexistent_token():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(400, {
+            "error": {
+                "code": "BAD_REQUEST_ERROR",
+                "description": "the id provided does not exist",
+            }
+        })
+
+    client = _mock_client(handler)
+    with pytest.raises(RazorpayError) as excinfo:
+        client.revoke_mandate_token(customer_id="cust_TEST123", token_id="token_DOES_NOT_EXIST")
+
+    assert excinfo.value.status_code == 400
+    assert "does not exist" in excinfo.value.description
+
+
 # -- simulated mandate lifecycle -----------------------------------------
 
 
@@ -262,6 +429,8 @@ def test_module_level_functions_exist_and_are_callable_attrs():
     for name in (
         "create_payment_link", "create_invoice", "create_customer",
         "create_mandate_registration_link", "execute_mandate", "revoke_mandate",
+        "create_plan", "create_mandate_via_subscription",
+        "check_mandate_execution", "revoke_mandate_token",
     ):
         assert callable(getattr(module, name))
 
