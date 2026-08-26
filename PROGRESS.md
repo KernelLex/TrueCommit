@@ -1,9 +1,36 @@
 # PROGRESS.md — Promise Keeper build status
-### Last updated: 2026-08-27 (P16+P17 — real phone call + real Telegram message/audio, both confirmed live) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
+### Last updated: 2026-08-27 (paused mid-planning on the IVR feature — see "PAUSED" section below) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
 
 > **Handing over between Claude sessions? Read `HANDOVER.md` first** — it carries the build mechanism (three-tier orchestration), the laws, the resume procedure, and the in-flight packet specs.
 
 The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG = what broke, TRACK_BAR = the judging bar, AI_JUDGMENT = where AI is/isn't used, BUILD_QUALITY = tests/reproducibility, DECISIONS = every deviation, PROBLEM_TASTE = claims + sources).
+
+---
+
+## ⏸ PAUSED (2026-08-27) — resume only on user signal, per the session's standing "wait pause" rule
+
+**Everything through P16+P17 is done, merged, committed, and pushed** (commit `0718cb1`) — real Twilio phone call, real Telegram text/audio, 554/554 tests green, seeded run byte-identical. That work is safe and does not depend on anything below.
+
+### 1. IVR (call → press 1/2 → real mandate or payment link) — SCOPED, ZERO CODE WRITTEN
+Confirmed priority via `AskUserQuestion`: (a) press 1/2 on a live call to choose eMandate vs. one-time payment link, real-time, real Razorpay object created from the debtor's own keypress; (b) which options the call even offers shaped by trust/bounds (don't offer a mandate if `check_bounds()` wouldn't allow one right now). **Explicitly deferred by the user's own choice** (not picked in scoping): multi-language call menu, and reviving Scene 2 — the latter also conflicts with the pre-agreed cut order (Scene 2 is item #2 to cut), flagged at the time.
+
+**Design decided (reasoning only, nothing written):** a new `Ledger.ivr_select(entity_id, kind, now)` mirroring `manual_reminder()`'s gate-then-emit shape, re-checking `check_bounds()` fresh at the moment the digit is pressed. The resulting real Razorpay call must NOT route through the autonomous pipeline's rate-limited `_payment_instrument()` (which only lets the *first* link/mandate per run go real, by design, for the automated 45-day simulator) — call `razorpay_client` directly and unconditionally instead, the same precedent P13's "Create Mandate Now" console established for a human/debtor-triggered one-off real action.
+**Next concrete steps, in order:** (1) confirm this design with the user before writing code: (2) add `Ledger.ivr_select()`; (3) add `GET/POST /telephony/ivr-menu?entity_id=` (dynamic `<Gather>` prompt built from live bounds/trust check); (4) add `POST /telephony/ivr-response?entity_id=` (reads Twilio's `Digits`, re-gates, creates the real object, speaks the confirmation); (5) extend `telephony.py` with `place_ivr_call()`; (6) a manual trigger route; (7) tests mirroring `test_telephony.py`'s gate-isolation style; (8) a live call test.
+
+### 2. WhatsApp reliability — RESEARCHED AND VERIFIED, PLANNED, ZERO CODE WRITTEN
+User found and proposed a real architecture (their own research, independently verified this session, not taken on faith): Twilio's WhatsApp Sandbox ships with **3 pre-approved templates** (confirmed via live web search against Twilio's actual docs — "Appointment Reminders", "Order Notifications", one more not yet identified), sendable via `ContentSid` **outside** the 24-hour session window, no WABA/business verification needed; **confirmed from Twilio's own docs** that a debtor's reply to a templated message opens a real 24-hour free-form window. The referenced GitHub repo (`KernelLex/CropRadar-01`, all 5 branches checked) does **not** actually contain this mechanism — it's a reactive bot that never hits the window problem — but did surface a numbered-menu multi-language (English/Kannada) SMS pattern, likely the source of the earlier multi-language call idea.
+
+**One real concern flagged, not yet resolved with the user:** the 3 sandbox templates have fixed, generic wording ("your order has shipped") — repurposing them to mean "your invoice is overdue" is content that's literally false on its face, in tension with this project's own honesty ethos even for a demo. A **custom** template with real wording needs the account moved off sandbox to a real WhatsApp-enabled sender, which needs the same business-verification wall already hit with Exotel — not something money buys around (confirmed via Twilio's own docs).
+
+**Recommended plan given that (proposed, not yet confirmed by the user):** build the real dual-path `Messenger` architecture (bounds pass → is a 24h window open, tracked via the existing `_inbound()` hook P11 already uses for link-open tracking → free-form if open, template-path if not) as a genuine, production-correct architecture story for the README — but use the generic sandbox template **only as a mechanism proof**, clearly labeled as a stand-in for a future real approved template, and keep **Telegram as the primary real-content real-delivery channel** for anything that must say the true reminder text right now. One concrete lookup still needed before any code: the real `ContentSid` (`HX...`) values, via Twilio's Content API or console — not guessed.
+
+**Separately, still open:** `engine/action/whatsapp_meta.py` (Meta direct API client) exists on disk, **untracked, uncommitted, not live-verified** — the one test attempt failed on an expired ~24h temporary access token. Not the recommended path anymore (Twilio's sandbox already has real quota and the actual fix is templates, not a second provider) — kept on disk in case it's wanted later, not deleted.
+
+### 3. Deployment / Ollama — answered, no action taken, ties to the existing memory note
+Confirmed for the user: deploying to a host like Render does **not** carry Ollama with it — Ollama runs on this laptop only, and a deployed server can't reach `localhost:11434` unless tunnelled (Tailscale, already installed for the Twilio webhook, could be extended to Ollama's port too). Standing recommendation restated, not changed: keep `heuristic` (offline, zero-dependency, 97.7% in-sample) as what the **deployed** instance actually depends on by default; any LLM (tunnelled Ollama, Groq, Ollama Cloud) stays an opt-in flourish, never what an unattended judge's visit relies on. Full detail already in memory (`project_ollama_cloud_deployment.md`), not re-litigated here.
+
+### What "resume" means
+Wait for the user to say go, then pick up in whichever order they choose: (1) IVR build, (2) WhatsApp dual-path architecture (needs ContentSid lookup + a decision on the honesty question above before coding), or (3) something else entirely. Nothing below this point has changed.
 
 ---
 
