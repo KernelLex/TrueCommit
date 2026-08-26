@@ -1,5 +1,5 @@
 # PROGRESS.md — Promise Keeper build status
-### Last updated: 2026-08-26 (post-demo) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
+### Last updated: 2026-08-26 (mandate rail pivoted + P11/P12 merged) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
 
 > **Handing over between Claude sessions? Read `HANDOVER.md` first** — it carries the build mechanism (three-tier orchestration), the laws, the resume procedure, and the in-flight packet specs.
 
@@ -86,8 +86,15 @@ User ask: press "next day" and SEE it in the UI — real conversation text, guar
 
 **Real bug the new visibility caught (not fixed here, deliberately — money-adjacent, needs its own review):** `Sentinel.mark_link_opened()` is fully built and tested but has zero call sites in the runner — every dispatched link/mandate times out as a "soft refusal" after 48h regardless of what actually happened, including mandates the debtor already confirmed. Confirmed via grep before merge. **P11 dispatched immediately after to fix it** (see below).
 
-## ⏸ P11 COMPLETE BUT UNREVIEWED — parked, awaiting user go-ahead (pause from "before a new phase, talk to me" still in effect for this specific packet)
-Reported done: 438/438 tests, the INV-001 smoking-gun scenario resolves correctly, all changes confined to `engine/integration/runner.py` + tests + tracking docs (untouched: `sentinel.py`, `state_machine.py`, `day_story.py`, `personas.py`). **Corrected the lead's own prior prediction with real measurement:** expected recovery to rise once the bug was fixed; it didn't move (₹23,31,496 both before and after) — three specific, measured reasons why, and a note that `trust.update_refusal` is pending-neutral so the "damaged trust" half of P10's diagnosis was wrong. What the fix actually bought: 9 fabricated refusal entries gone, 6 entities no longer wrongly flagged `mandate_refused`, an honest audit trail — a track-bar win (audit trail integrity), not a recovery-₹ win, in this 45-day window. Full report in `tracking/BUILD_LOG.md`. **Not reviewed or merged — sitting exactly as reported, waiting on the user.**
+## ✅ P11 MERGED (2026-08-26) — link-open tracking fixed, audit trail is honest again
+User gave the explicit go-ahead to review + merge. Lead independently re-ran the full suite (438/438) plus all 5 new tests individually, and by-hand reproduced the 45-day distribution and recovered-₹ two ways (raw entity counter first showed an apparent mismatch — 12 vs 3 DISPUTED, ₹23,24,347 vs ₹23,31,496 — both fully reconciled: the 9 invoices pre-disputed at day 0 sit outside the "51 active" cohort the report scoped to, and the ₹7,149 gap was the two Tier-0 reserve carts, which a quick invoice-only script had missed). Merged (`2b386be`).
+- **The fix:** `mark_link_opened()` now actually gets called, at the exact moment a debtor replies to a tracked instrument, without weakening genuine 48h-silence handling (a dedicated test proves true silence still soft-refuses).
+- **Honest correction on the record:** the lead predicted recovery would rise once fixed; measured result says it didn't move at all (₹23,31,496 both times) — P11 diagnosed exactly why (the false refusal always arrived after the money had already moved; no falsely-barred entity re-promised inside 45 days; `trust.update_refusal` is pending-neutral so no trust damage ever occurred either). What the fix actually bought: 9 fabricated refusal entries gone, 6 entities no longer wrongly flagged — an audit-trail-integrity win, not a recovery-₹ one, in this dataset. The latent money-bug risk (a barred entity that DOES re-promise) is now closed since there's no false bar left to trigger it.
+
+## ✅ P12 MERGED (2026-08-26) — `razorpay_client.py` now speaks eMandate-via-Subscriptions
+Lead re-ran the full suite (445/445) and independently verified the three "byte-unchanged" claims by diffing function bodies with docstrings stripped out (two false positives from a quick regex traced to an adjacent comment and unrelated new functions, then confirmed clean by direct reading). Merged (`aec5a4b`).
+- **New primary mandate path**, matching the live-verified shapes exactly: `create_plan` + `create_mandate_via_subscription` (`total_count: 1` for a true one-time debit, `start_at` schedules the charge for the invoice due date, not immediately) · `check_mandate_execution` (a query, not a command — Razorpay's billing engine auto-charges, this never reads the laggy `subscription.status` field, confirms via a real captured payment instead) · `revoke_mandate_token` (the real `DELETE`, already proven live).
+- **Nothing else moved:** the old UPI `auth_links` method is untouched code, kept as the alternate rail; the automated pipeline's `execute_mandate`/`revoke_mandate` simulated stubs are byte-identical in behavior (only docstrings updated) — `engine/integration/runner.py` needed zero changes.
 
 ## ✅ eMandate rail pivot — VERIFIED FULLY REAL end to end (2026-08-26, lead + user together)
 User checked the Razorpay TEST dashboard directly and found netbanking eMandate enabled with no gate under **Subscriptions** settings (a different product surface than the registration-links API the Day-1 probe used) — UPI Autopay stays gated, left alone as instructed. Lead live-verified the complete lifecycle before any code changed, per explicit instruction:
@@ -96,8 +103,6 @@ User checked the Razorpay TEST dashboard directly and found netbanking eMandate 
 - One honest quirk found: `subscription.status` lags the real payment record — the payment object is the reliable source of truth, not the subscription's own status field.
 - **This closes the "mandate execute/revoke realness" open risk entirely.** Full narrative + real IDs: `tracking/BUILD_LOG.md`. `TRACK_BAR.md` §0 and `DECISIONS.md` updated and pushed (`80adc7f`).
 
-## 🔄 IN FLIGHT — P12: pivot `razorpay_client.py` to eMandate-via-Subscriptions
-Sonnet, dispatched with the exact live-verified request/response shapes embedded (no re-guessing). Adds `create_plan` / `create_mandate_via_subscription` (the new primary registration path, `start_at`-scheduled) / `check_mandate_execution` (a query, not a command — Razorpay's own billing engine auto-charges, we don't trigger it) / `revoke_mandate_token` (the real `DELETE`). The old UPI `auth_links` method and the simulated `execute_mandate`/`revoke_mandate` stubs stay exactly as they are (docstrings updated only) — the automated 45-day pipeline keeps using simulated execution because the real billing engine can't keep pace with a simulator running 45 virtual days in seconds; that's now a scheduling constraint, not a capability gap. `engine/integration/runner.py` needs zero changes.
 
 ## ⏸ PARKED (user decision 2026-08-26 — resume only on user signal)
 - **Mandate flow-real enablement**: this test account lacks UPI/eMandate (account-level gate, needs business KYC the user rightly won't fabricate, or an organizer-provisioned hackathon account). Everything documented (BUILD_LOG + TRACK_BAR §0 API-real vs flow-real); harness armed (`scripts/verify_mandate_lifecycle.py`); demo + submission fully intact without it. Optional upgrade path: ask buildathon organizers for an enabled test account.
@@ -129,7 +134,7 @@ All eight beats executed live against the merged code; every number below was pr
 
 ## How to run what exists today
 ```
-./.venv/Scripts/python.exe -m pytest tests/ -q          # 394 tests
+./.venv/Scripts/python.exe -m pytest tests/ -q          # 445 tests
 ./.venv/Scripts/python.exe -m sim.run --days 45 --seed 42   # deterministic world
 ./.venv/Scripts/python.exe -m uvicorn api.main:app          # API on :8000
 ./.venv/Scripts/python.exe -m scripts.verify_razorpay_sandbox  # live sandbox probes (needs .env keys)
