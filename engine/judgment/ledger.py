@@ -53,9 +53,12 @@ manual event injection in tests and demos.
 """
 
 import datetime as dt
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 from engine.judgment import state_machine, trust
-from engine.judgment.state_machine import BoundsResult, EntityState
+from engine.judgment.state_machine import BoundsCheck, BoundsResult, EntityState
 from engine.schemas import Action, AuditEntry, HeldAction, Invoice, Promise, TrustState
 
 # Escalation stage -> the action the ladder attempts at that stage
@@ -119,6 +122,48 @@ FORMAL_NOTICE_REFUSAL = (
 )
 
 
+KILL_SWITCH_CHECK = "merchant_kill_switch"
+"""The one gate that is NOT a hard bound and so is not in `state_machine.py`:
+the merchant's pause. It is enforced in `_gate()` (see below) ahead of the
+bounds, so a recorded checklist that omitted it could show "all bounds passed"
+next to a refusal. It is therefore prepended to every recorded checklist for an
+outbound kind, which keeps `allowed == all(checks passed)` true for a
+GateRecord exactly as `check_bounds_detailed()` keeps it true for the bounds."""
+
+
+class GateRecord(BaseModel):
+    """WHAT `_gate()` ACTUALLY SAW, kept so a human can be shown it later.
+
+    Packet P10. The audit trail records that an action was allowed or blocked
+    and *why* in one sentence; this records the full per-bound working behind
+    that sentence, at the moment it was computed. It exists because the
+    alternative — re-running the bounds against today's entity state to explain
+    a decision made on day 3 — would put numbers on screen that were never the
+    ones the system decided from (CLAUDE.md law 8).
+
+    Pure bookkeeping: nothing reads a GateRecord to decide anything. It is
+    append-only, written after the verdict, and `check_bounds()` neither sees
+    it nor is affected by it. `audit_id` / `action_id` link it back into the
+    append-only trail so the API can attach a checklist to the exact audit
+    entry it belongs to instead of guessing by timestamp.
+    """
+
+    seq: int
+    entity_id: str
+    debtor_id: str
+    kind: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    ts: dt.datetime
+    allowed: bool
+    reason: str
+    checks: list[BoundsCheck] = Field(default_factory=list)
+    audit_id: str | None = None
+    """The audit entry this gate produced: the block entry when refused, the
+    action entry when allowed. None while a passing gate's action is still
+    being built, or for a hold (which is queued, not emitted)."""
+    action_id: str | None = None
+
+
 class ReviewQueueError(Exception):
     """A review-queue click that cannot be honoured: unknown id, already
     resolved, wrong entity state, or an item the agent must never send.
@@ -157,7 +202,15 @@ class Ledger:
         """entity_id -> merchant kill-switch. True = no outbound action of any
         kind, from any path."""
 
+        self.gate_log: list[GateRecord] = []
+        """Every `_gate()` call, with the full per-bound checklist it computed
+        (packet P10). Append-only, read-only to everything: the dashboard's
+        "Guardrails checked" panel renders these, so what a judge sees is the
+        working the decision was actually made from, not a re-derivation."""
+        self._pending_gate: GateRecord | None = None
+
         self._action_seq = 0
+        self._gate_seq = 0
         self._audit_seq = 0
         self._promise_seq = 0
         self._held_seq = 0
@@ -493,20 +546,69 @@ class Ledger:
         Order matters: the merchant kill-switch is checked FIRST, because it is
         the one refusal a human asked for by name and it should be the reason
         recorded, not whichever bound happened to also apply.
+
+        Packet P10 added the `GateRecord` written alongside the verdict. It
+        changes nothing about the verdict: `check_bounds()` is still the only
+        thing consulted, still short-circuits, still gets exactly the same
+        arguments. The record is the same call re-run through
+        `check_bounds_detailed()` — a lens, not a second opinion (see that
+        function's docstring for the invariant that makes the two inseparable).
         """
         entity_id = entity.entity_id
-        if self.paused.get(entity_id) and kind in state_machine.OUTBOUND_KINDS:
+        outbound = kind in state_machine.OUTBOUND_KINDS
+        debtor_touches = self._debtor_touches(entity_id)
+
+        if self.paused.get(entity_id) and outbound:
             result = BoundsResult(allowed=False, reason="thread paused by merchant (kill-switch)")
+            checks = [BoundsCheck(
+                name=KILL_SWITCH_CHECK, passed=False,
+                detail="thread paused by the merchant (kill-switch) — the hard bounds were not consulted",
+            )]
         else:
-            result = state_machine.check_bounds(
-                entity, kind, params, now, self._debtor_touches(entity_id)
-            )
+            result = state_machine.check_bounds(entity, kind, params, now, debtor_touches)
+            checks = [BoundsCheck(
+                name=KILL_SWITCH_CHECK, passed=True,
+                detail="thread is not paused by the merchant",
+            )] if outbound else []
+            checks += state_machine.check_bounds_detailed(entity, kind, params, now, debtor_touches)
+
+        self._gate_seq += 1
+        record = GateRecord(
+            seq=self._gate_seq, entity_id=entity_id, debtor_id=self._debtor_id(entity_id),
+            kind=kind, params=dict(params), ts=now,
+            allowed=result.allowed, reason=result.reason, checks=checks,
+        )
+        self.gate_log.append(record)
+        self._pending_gate = record
+
         if not result.allowed:
-            self._audit(
+            entry = self._audit(
                 entity_id, "sentinel", f"action blocked: {kind}",
                 {"reason": result.reason, "params": params, "debtor_id": self._debtor_id(entity_id)}, now,
             )
+            record.audit_id = entry.id
+            self._pending_gate = None
         return result
+
+    def _claim_gate(self, action: Action, audit_id: str) -> None:
+        """Link the gate that just passed to the action it let through.
+
+        The gate immediately precedes the emit on every path that has one, so
+        the pending record is the right one or there is none — the identity
+        check below is what makes "or there is none" safe. `_tier0_recover`'s
+        reserve capture and the evidence-packet/handoff emits have no gate of
+        their own; they simply match nothing and stay unlinked, which is the
+        honest answer for them (`_gate` never ran).
+        """
+        record = self._pending_gate
+        if (
+            record is not None and record.allowed and record.action_id is None
+            and record.entity_id == action.entity_id and record.kind == action.kind
+            and record.params == action.params
+        ):
+            record.action_id = action.id
+            record.audit_id = audit_id
+            self._pending_gate = None
 
     def _try_action(self, entity: EntityState, kind: str, params: dict, reason: str, now: dt.datetime) -> Action | None:
         if not self._gate(entity, kind, params, now).allowed:
@@ -520,7 +622,8 @@ class Ledger:
             id=self._next_action_id(), entity_id=entity.entity_id, kind=kind,
             params=params, reason=reason, bounds_checked=bounds_checked, ts=now,
         )
-        self._audit(entity.entity_id, "action", f"{kind}: {reason}", {"action_id": action.id, "params": params}, now)
+        entry = self._audit(entity.entity_id, "action", f"{kind}: {reason}", {"action_id": action.id, "params": params}, now)
+        self._claim_gate(action, entry.id)
         return action
 
     # -- the human side of the loop -----------------------------------------

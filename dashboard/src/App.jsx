@@ -3,6 +3,7 @@ import './App.css'
 import { api } from './api'
 import ToastStack from './components/Toast'
 import FunnelScreen from './screens/FunnelScreen'
+import DayStoryScreen from './screens/DayStoryScreen'
 import EntityTimelineScreen from './screens/EntityTimelineScreen'
 import TrustCurvesScreen from './screens/TrustCurvesScreen'
 import HumanReviewScreen from './screens/HumanReviewScreen'
@@ -10,6 +11,7 @@ import SystemHealthScreen from './screens/SystemHealthScreen'
 
 const TABS = [
   { key: 'funnel', label: 'Funnel', component: FunnelScreen },
+  { key: 'daystory', label: 'Day Story', component: DayStoryScreen },
   { key: 'timeline', label: 'Entity Timeline', component: EntityTimelineScreen },
   { key: 'trust', label: 'Trust Curves', component: TrustCurvesScreen },
   { key: 'review', label: 'Human Review', component: HumanReviewScreen },
@@ -20,6 +22,9 @@ function App() {
   const [tab, setTab] = useState('funnel')
   const [toasts, setToasts] = useState([])
   const [advancing, setAdvancing] = useState(false)
+  // The day a successful /advance just simulated, lifted here so the time-warp
+  // buttons can hand the Day Story screen the day it should open on.
+  const [storyDay, setStoryDay] = useState(null)
   const toastSeq = useRef(0)
 
   const pushToast = useCallback((text, kind = 'info') => {
@@ -34,8 +39,17 @@ function App() {
     async (days) => {
       setAdvancing(true)
       try {
-        await api.advance(days)
-        pushToast(`Advanced ${days} day${days === 1 ? '' : 's'}.`, 'success')
+        const result = await api.advance(days)
+        // /advance now returns the story for each day it just simulated
+        // (packet P10). Land on the LAST one — the day that just happened —
+        // so pressing the button shows what it did instead of only moving a
+        // counter. `result.day` is days ELAPSED, so the last simulated index
+        // is one less; the stories keys are the authority when present.
+        const days_run = Object.keys(result?.stories || {}).map(Number)
+        const landed = days_run.length > 0 ? Math.max(...days_run) : (result?.day ?? 1) - 1
+        setStoryDay(Math.max(0, landed))
+        setTab('daystory')
+        pushToast(`Advanced ${days} day${days === 1 ? '' : 's'} — showing day ${Math.max(0, landed)}.`, 'success')
       } catch (e) {
         // /advance doesn't exist yet — a later packet adds the integration
         // runner. Never let this crash the dashboard.
@@ -79,7 +93,7 @@ function App() {
           ))}
         </nav>
         <main className="app-main">
-          <ActiveScreen />
+          <ActiveScreen dayHint={storyDay} />
         </main>
       </div>
 

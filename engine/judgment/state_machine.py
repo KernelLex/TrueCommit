@@ -104,6 +104,15 @@ class BoundsResult(BaseModel):
     reason: str
 
 
+class BoundsCheck(BaseModel):
+    """One line of `check_bounds_detailed()`'s checklist — a single bound, the
+    verdict it reached, and the real numbers it reached it from."""
+
+    name: str
+    passed: bool
+    detail: str
+
+
 def check_bounds(
     entity: EntityState,
     action_kind: str,
@@ -163,6 +172,154 @@ def check_bounds(
             )
 
     return BoundsResult(allowed=True, reason="ok")
+
+
+def check_bounds_detailed(
+    entity: EntityState,
+    action_kind: str,
+    params: dict[str, Any],
+    now: dt.datetime,
+    debtor_touches: list[dt.datetime] | None = None,
+) -> list[BoundsCheck]:
+    """A LENS ON `check_bounds()`, NEVER A SECOND GATE.
+
+    `check_bounds()` above short-circuits: it returns the FIRST bound that
+    refuses, because that is all a gate needs to decide. That makes it a poor
+    thing to show a human — "blocked: max_touches_per_week" says nothing about
+    the six other bounds that were never reached, and an ALLOWED action shows
+    no working at all.
+
+    This function answers the presentation question instead: run EVERY check
+    that applies to `action_kind`, in `check_bounds()`'s own order, and report
+    each one with the actual numbers it compared. Nothing here decides
+    anything — the ledger's `_gate()` still calls `check_bounds()` for the
+    verdict and only records this alongside it.
+
+    THE INVARIANT THAT MAKES THAT SAFE:
+
+        check_bounds(*args).allowed == all(c.passed for c in check_bounds_detailed(*args))
+
+    for every input, proven over a large random sample by
+    `tests/test_state_machine.py::test_check_bounds_detailed_can_never_disagree_with_check_bounds`
+    (which also pins that the FIRST failing check is the one `check_bounds()`
+    names in its reason). A checklist that could show something the real
+    decision didn't would be worse than no checklist at all.
+
+    A check appears in the list exactly when `check_bounds()` would actually
+    evaluate its condition — same guards, same order. An amount-dependent
+    check against `params` that carry no amount is not silently reported as
+    "passed"; it is simply absent, because it did not run.
+
+    One deliberate asymmetry, and the only one: the mandate-cap comparison is
+    additionally guarded on the amount being numeric. `check_bounds()` would
+    raise `TypeError` on a hand-typed `?amount_inr=lots`; this function is
+    read by an HTTP preview route, so it declines to evaluate that check
+    rather than crash. Every producer inside the system writes an int there
+    (the ledger copies it from its own invoice record), so the two never
+    diverge on any input the pipeline can actually make.
+    """
+    checks: list[BoundsCheck] = []
+    amount = params.get("amount_inr")
+    numeric_amount = isinstance(amount, (int, float)) and not isinstance(amount, bool)
+
+    if action_kind in OUTBOUND_KINDS:
+        terminal = entity.state in TERMINAL_STATES
+        checks.append(BoundsCheck(
+            name="terminal_state_stops_outbound",
+            passed=not terminal,
+            detail=(
+                f"state {entity.state} is terminal — no further outbound actions"
+                if terminal else
+                f"state {entity.state} is not terminal "
+                f"(terminal: {', '.join(sorted(TERMINAL_STATES))})"
+            ),
+        ))
+
+    if action_kind == "mandate_offer":
+        checks.append(BoundsCheck(
+            name="no_mandate_reoffer_after_refusal",
+            passed=not entity.mandate_refused,
+            detail=(
+                "this debtor already refused a mandate — re-offer is NEVER allowed"
+                if entity.mandate_refused else
+                "no mandate refusal on record for this entity"
+            ),
+        ))
+        checks.append(BoundsCheck(
+            name="renegotiation_cap",
+            passed=entity.renegotiation_count <= RENEGOTIATION_CAP,
+            detail=(
+                f"renegotiations so far: {entity.renegotiation_count} "
+                f"{'<=' if entity.renegotiation_count <= RENEGOTIATION_CAP else '>'} "
+                f"cap {RENEGOTIATION_CAP}"
+            ),
+        ))
+        if numeric_amount:
+            checks.append(BoundsCheck(
+                name="mandate_amount_cap",
+                passed=not (amount > MANDATE_AMOUNT_CAP),
+                detail=(
+                    f"mandate amount: Rs.{amount:,} "
+                    f"{'<=' if amount <= MANDATE_AMOUNT_CAP else '>'} "
+                    f"cap Rs.{MANDATE_AMOUNT_CAP:,}"
+                ),
+            ))
+
+    if action_kind in ("mandate_offer", "mandate_execute"):
+        ledger_amount = entity.invoice_amount_inr
+        if amount is not None and ledger_amount is not None:
+            matches = amount == ledger_amount
+            checks.append(BoundsCheck(
+                name="mandate_amount_matches_ledger",
+                passed=matches,
+                detail=(
+                    f"amount matches ledger: Rs.{amount:,} == Rs.{ledger_amount:,}"
+                    if matches and numeric_amount else
+                    f"amount {amount!r} != ledger invoice amount Rs.{ledger_amount:,} "
+                    "(no invented numbers)"
+                    if not matches else
+                    f"amount matches ledger record ({amount!r})"
+                ),
+            ))
+
+    if action_kind == "mandate_execute":
+        checks.append(BoundsCheck(
+            name="retry_on_execution_failure",
+            passed=entity.retry_count <= RETRY_ON_EXECUTION_FAILURE,
+            detail=(
+                f"retries used: {entity.retry_count} "
+                f"{'<=' if entity.retry_count <= RETRY_ON_EXECUTION_FAILURE else '>'} "
+                f"limit {RETRY_ON_EXECUTION_FAILURE}"
+            ),
+        ))
+
+    if action_kind in ("message", "link", "mandate_offer", "voice"):
+        stage = params.get("stage")
+        checks.append(BoundsCheck(
+            name="legal_stage_goes_to_merchant",
+            passed=stage != "legal",
+            detail=(
+                "stage 'legal' — legal-stage notices go to the merchant for review; "
+                "the agent never sends legal communication itself"
+                if stage == "legal" else
+                "this action carries no stage — not a legal-stage notice"
+                if stage is None else
+                f"stage {stage!r} is not a legal-stage notice"
+            ),
+        ))
+        window = entity.touches if debtor_touches is None else debtor_touches
+        recent = [t for t in window if (now - t).days < TOUCH_WINDOW_DAYS]
+        scope = "this entity" if debtor_touches is None else "this debtor's entities"
+        checks.append(BoundsCheck(
+            name="max_touches_per_week",
+            passed=len(recent) < MAX_TOUCHES_PER_WEEK,
+            detail=(
+                f"touches in the last {TOUCH_WINDOW_DAYS} days across {scope}: "
+                f"{len(recent)}/{MAX_TOUCHES_PER_WEEK} (limit {MAX_TOUCHES_PER_WEEK})"
+            ),
+        ))
+
+    return checks
 
 
 def transition(entity: EntityState, event_type: str, payload: dict[str, Any], now: dt.datetime) -> EntityState:

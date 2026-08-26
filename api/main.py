@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from engine import config as agent_config
 from engine.action.evidence import render_card
+from engine.integration import day_story
 from engine.integration.runner import WorldRunner
 from engine.judgment import state_machine
 from engine.judgment.ledger import (
@@ -83,8 +84,20 @@ def health() -> dict:
 def advance(body: AdvanceIn | None = None) -> dict:
     """The TIME-WARP button. `{"days": 1}` = "Advance 1 Day ▶",
     `{"days": 45}` = "Run to Day 45 ⏩". Every state change it produces went
-    through `ledger.process_event` -> `check_bounds()` -> audit-before-action."""
-    return runner.advance((body or AdvanceIn()).days)
+    through `ledger.process_event` -> `check_bounds()` -> audit-before-action.
+
+    Packet P10 added ONE additive field, `stories`: `{day: [entity block, ...]}`
+    for the day(s) this call just simulated, so the dashboard can jump straight
+    to what happened instead of asking again. It is built by the SAME function
+    `GET /day/{n}/story` serves, and there is a test that their beats are
+    identical — a second code path here would be a second chance to disagree.
+    Every pre-existing field is untouched.
+    """
+    days = (body or AdvanceIn()).days
+    first_day = runner.day
+    result = runner.advance(days)
+    result["stories"] = day_story.build_stories(runner, range(first_day, runner.day))
+    return result
 
 
 @app.get("/world")
@@ -139,6 +152,94 @@ def get_entity_audit(entity_id: str) -> list[dict]:
 @app.get("/audit")
 def get_audit(limit: int = 100) -> list[dict]:
     return [json.loads(a.model_dump_json()) for a in ledger.audit[-limit:]]
+
+
+# ---------------------------------------------------------------------------
+# Day Story (packet P10) — five READ-ONLY routes that surface data the pipeline
+# already computed and audited. None of them decides, sends, mutates, or writes
+# an audit entry; each one is a lens on `Ledger.audit`, `Ledger.gate_log`,
+# `WorldRunner.threads` and `WorldRunner.day_snapshots`. Everything they return
+# traces to a stored value, and where a value does not exist they return null
+# plus a note saying so rather than a plausible-looking substitute
+# (CLAUDE.md law 8). See engine/integration/day_story.py.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/debtors")
+def list_debtors() -> dict:
+    """`{debtor_id: {name, trust_*, entities}}` — the names behind the entity
+    ids, so a judge reads "Acme Traders", not "INV-001".
+
+    Scene-2 cart customers have `name: null` and a `name_note` explaining why:
+    `data/carts.json` stores a `customer_id` and no business name, and inventing
+    one would be a fabrication sitting next to real money.
+    """
+    return day_story.debtor_directory(runner)
+
+
+@app.get("/entities/{entity_id}/conversation")
+def get_conversation(entity_id: str) -> dict:
+    """The real thread for one entity — `WorldRunner.threads[entity_id]`, both
+    directions, exactly the Messages the extractor read and the messenger sent.
+    `origin` separates messages this run produced from the dataset's seed
+    thread history it inherited."""
+    if entity_id not in ledger.entities and entity_id not in runner.threads:
+        raise HTTPException(status_code=404, detail="unknown entity")
+    return day_story.conversation(runner, entity_id)
+
+
+@app.get("/entities/{entity_id}/guardrail-checks")
+def get_guardrail_checks(
+    entity_id: str, action_kind: str | None = None, stage: str | None = None
+) -> dict:
+    """A READ-ONLY PREVIEW: "if this action were attempted right now, here is
+    every bound and its result." With no `action_kind` it previews the action
+    the ledger's own tables say this entity's next one would be.
+
+    It is not the gate and cannot become one — it never calls `Ledger._gate()`,
+    so it creates no Action, spends no touch, and writes nothing to the audit
+    trail. The checks come from `check_bounds_detailed()`, which is proven
+    unable to disagree with the real `check_bounds()`
+    (`tests/test_state_machine.py::test_check_bounds_detailed_can_never_disagree_with_check_bounds`).
+    """
+    preview = day_story.guardrail_preview(runner, entity_id, action_kind, stage)
+    if preview is None:
+        raise HTTPException(status_code=404, detail="unknown entity")
+    return preview
+
+
+@app.get("/entities/{entity_id}/mandate-timeline")
+def get_mandate_timeline(entity_id: str) -> dict:
+    """The eMandate lifecycle end to end, reconstructed from the audit trail:
+    offered -> registration link issued -> the debtor's response -> executed or
+    failed -> revoked, each step carrying the audit entry it came from.
+
+    Every step is labelled with its `nature`, and the labelling is the point.
+    Registration links are REAL Razorpay TEST-mode objects when the run opted
+    in; execution is SIMULATED in every run, because this sandbox account has
+    UPI disabled and eMandate not enabled, so no token can be authorized to
+    charge (tracking/TRACK_BAR.md §0). An entity with no mandate gets an empty
+    `steps` list and a `status`, not a 404.
+    """
+    if entity_id not in ledger.entities and entity_id not in runner.threads:
+        raise HTTPException(status_code=404, detail="unknown entity")
+    return day_story.mandate_timeline(runner, entity_id)
+
+
+@app.get("/day/{day}/story")
+def get_day_story(day: int) -> dict:
+    """What happened on one simulated day, per entity, as an ordered list of
+    beats: the conversation as it was actually said, the decisions as they were
+    actually audited, and the guardrail checklist recorded at the moment each
+    decision was made.
+
+    `day` is the runner's 0-based day INDEX — `advance(1)` simulates day 0 — so
+    the day a judge just watched happen is `world_day - 1`. A day that has not
+    been simulated yet returns an empty story with a `status`, not an error.
+    """
+    if day < 0:
+        raise HTTPException(status_code=422, detail="day must be >= 0")
+    return day_story.build_day_story(runner, day)
 
 
 # ---------------------------------------------------------------------------

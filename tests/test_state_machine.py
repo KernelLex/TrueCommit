@@ -312,6 +312,165 @@ def test_a_human_resolved_entity_is_terminal_again_immediately():
         assert not sm.check_bounds(e, kind, {"amount_inr": 40000}, NOW).allowed
 
 
+# ---------------------------------------------------------------------------
+# 5. check_bounds_detailed() is a LENS on check_bounds(), never a second gate
+#    (packet P10 — the guardrail introspection the Day Story screen renders)
+# ---------------------------------------------------------------------------
+
+ALL_ACTION_KINDS = sorted(sm.OUTBOUND_KINDS | {"evidence_packet", "human_handoff"})
+
+FIRST_FAILURE_REASON_KEYWORD = {
+    "terminal_state_stops_outbound": "terminal state",
+    "no_mandate_reoffer_after_refusal": "NEVER",
+    "renegotiation_cap": "renegotiation_cap",
+    "mandate_amount_cap": "mandate_amount_cap",
+    "mandate_amount_matches_ledger": "equal ledger invoice amount",
+    "retry_on_execution_failure": "retry_on_execution_failure",
+    "legal_stage_goes_to_merchant": "merchant",
+    "max_touches_per_week": "max_touches_per_week",
+}
+
+
+def _random_bounds_input(rng: random.Random) -> tuple[sm.EntityState, str, dict, list | None]:
+    e = sm.EntityState(
+        entity_id=f"INV-FUZZ-{rng.randint(0, 999)}",
+        state=rng.choice(list(sm.State.__args__)),
+        escalate_stage=rng.randint(0, 5),
+        renegotiation_count=rng.randint(0, sm.RENEGOTIATION_CAP + 2),
+        retry_count=rng.randint(0, sm.RETRY_ON_EXECUTION_FAILURE + 2),
+        mandate_refused=rng.random() < 0.3,
+        touches=[NOW - dt.timedelta(days=rng.randint(0, 14)) for _ in range(rng.randint(0, 4))],
+        invoice_amount_inr=rng.choice([None, 40_000, 100_000, 100_001, 150_000]),
+    )
+    kind = rng.choice(ALL_ACTION_KINDS)
+    params: dict = {}
+    if rng.random() < 0.85:
+        params["amount_inr"] = rng.choice([None, 40_000, 99_999, 100_000, 100_001, 150_000])
+    if rng.random() < 0.7:
+        params["stage"] = rng.choice(["gentle", "firm", "formal", "legal", "clarify", None])
+    debtor_touches = (
+        None if rng.random() < 0.4
+        else [NOW - dt.timedelta(days=rng.randint(0, 14)) for _ in range(rng.randint(0, 5))]
+    )
+    return e, kind, params, debtor_touches
+
+
+def test_check_bounds_detailed_can_never_disagree_with_check_bounds():
+    """THE PROOF that the dashboard's "Guardrails checked" panel can never show
+    something the real decision didn't reach.
+
+    `check_bounds()` short-circuits on the first refusal and is the only gate;
+    `check_bounds_detailed()` runs every applicable check so a human can see
+    the working. If those two could ever disagree, the UI would be showing a
+    decision the system never made — CLAUDE.md law 8, applied to a screen.
+
+    Two properties over 5000 random (entity, action_kind, params, window)
+    combinations:
+      1. allowed == all checks passed,
+      2. when refused, the FIRST failing check is the bound check_bounds()
+         actually names in its reason (so the checklist's order is the gate's
+         order, not a re-ranking).
+    """
+    rng = random.Random(20260826)
+    seen_kinds: set[str] = set()
+    seen_first_failures: set[str] = set()
+    refused = 0
+
+    for _ in range(5000):
+        e, kind, params, debtor_touches = _random_bounds_input(rng)
+        verdict = sm.check_bounds(e, kind, params, NOW, debtor_touches)
+        checks = sm.check_bounds_detailed(e, kind, params, NOW, debtor_touches)
+        seen_kinds.add(kind)
+
+        assert verdict.allowed == all(c.passed for c in checks), (
+            f"{kind} {params} against {e.state}: check_bounds said allowed="
+            f"{verdict.allowed} ({verdict.reason}) but the checklist says "
+            f"{[(c.name, c.passed) for c in checks]}"
+        )
+
+        if not verdict.allowed:
+            refused += 1
+            first_failure = next(c for c in checks if not c.passed)
+            seen_first_failures.add(first_failure.name)
+            keyword = FIRST_FAILURE_REASON_KEYWORD[first_failure.name]
+            assert keyword in verdict.reason, (
+                f"first failing check {first_failure.name} does not match the "
+                f"reason check_bounds gave: {verdict.reason}"
+            )
+
+        assert all(c.detail for c in checks), "every check must carry its numbers"
+
+    # the sample really did exercise the whole surface, not one lucky corner
+    assert seen_kinds == set(ALL_ACTION_KINDS)
+    assert seen_first_failures == set(FIRST_FAILURE_REASON_KEYWORD)
+    assert refused > 1000
+
+
+def test_check_bounds_detailed_is_a_pure_predicate_too():
+    before = entity(state="ESCALATE_1", touches=[NOW - dt.timedelta(days=1)], invoice_amount_inr=40000)
+    snapshot = before.model_dump()
+    debtor_touches = [NOW - dt.timedelta(days=1), NOW - dt.timedelta(days=2)]
+    debtor_snapshot = list(debtor_touches)
+    params = {"amount_inr": 40000}
+    params_snapshot = dict(params)
+
+    sm.check_bounds_detailed(before, "mandate_offer", params, NOW, debtor_touches)
+
+    assert before.model_dump() == snapshot
+    assert debtor_touches == debtor_snapshot
+    assert params == params_snapshot
+
+
+def test_check_bounds_detailed_reports_every_applicable_bound_with_real_numbers():
+    """The judge-facing shape: a mandate offer is measured against six bounds,
+    and each line carries the figures it compared — not a pass/fail pill."""
+    e = entity(state="MANDATED", invoice_amount_inr=40000, touches=[NOW - dt.timedelta(days=1)])
+    checks = sm.check_bounds_detailed(e, "mandate_offer", {"amount_inr": 40000}, NOW)
+
+    assert [c.name for c in checks] == [
+        "terminal_state_stops_outbound",
+        "no_mandate_reoffer_after_refusal",
+        "renegotiation_cap",
+        "mandate_amount_cap",
+        "mandate_amount_matches_ledger",
+        "legal_stage_goes_to_merchant",
+        "max_touches_per_week",
+    ]
+    assert all(c.passed for c in checks)
+    detail = {c.name: c.detail for c in checks}
+    assert "Rs.40,000" in detail["mandate_amount_cap"]
+    # same `{:,}` grouping check_bounds()'s own reason strings use, so the
+    # checklist and the refusal reason read as one voice
+    assert f"Rs.{sm.MANDATE_AMOUNT_CAP:,}" in detail["mandate_amount_cap"]
+    assert "Rs.40,000 == Rs.40,000" in detail["mandate_amount_matches_ledger"]
+    assert "1/2" in detail["max_touches_per_week"]
+
+
+def test_a_check_that_did_not_run_is_absent_rather_than_reported_as_passed():
+    """No amount in params -> the two amount bounds were not evaluated, so they
+    do not appear. Reporting them as "passed" would be a claim the gate never
+    made."""
+    e = entity(state="ESCALATE_1")
+    names = {c.name for c in sm.check_bounds_detailed(e, "message", {"stage": "firm"}, NOW)}
+    assert "mandate_amount_cap" not in names
+    assert "mandate_amount_matches_ledger" not in names
+    assert names == {
+        "terminal_state_stops_outbound",
+        "legal_stage_goes_to_merchant",
+        "max_touches_per_week",
+    }
+
+
+def test_check_bounds_itself_still_short_circuits_on_the_first_refusal():
+    """The gate did not become the checklist: it still returns ONE reason, the
+    first bound that refused, exactly as before."""
+    e = entity(state="DISPUTED", mandate_refused=True, renegotiation_count=9, invoice_amount_inr=40000)
+    result = sm.check_bounds(e, "mandate_offer", {"amount_inr": 999_999}, NOW)
+    assert isinstance(result, sm.BoundsResult)
+    assert not result.allowed
+    assert "terminal state" in result.reason  # the FIRST one, not a list of all four
+
+
 def test_hard_step_cap_forces_termination_even_with_only_silent_events():
     """No failures, no dispute, no promise — just repeated no-op events. The
     step-count backstop must still force a terminal state (CLAUDE.md law #5:

@@ -63,6 +63,23 @@ export const api = {
   // status — everything the System Health "Agent parameters" and live
   // status cards render comes from this one call.
   config: () => request('/config'),
+  world: () => request('/world'),
+
+  // ---- Packet P10: the Day Story surface --------------------------------
+  // All five are READ-ONLY lenses on data the engine already computed and
+  // audited. `guardrailChecks` in particular is a preview, not an action: it
+  // creates nothing and writes no audit entry (there is a test).
+  debtors: () => request('/debtors'),
+  conversation: (id) => request(`/entities/${encodeURIComponent(id)}/conversation`),
+  guardrailChecks: (id, { actionKind, stage } = {}) => {
+    const query = new URLSearchParams()
+    if (actionKind) query.set('action_kind', actionKind)
+    if (stage) query.set('stage', stage)
+    const suffix = query.toString() ? `?${query}` : ''
+    return request(`/entities/${encodeURIComponent(id)}/guardrail-checks${suffix}`)
+  },
+  mandateTimeline: (id) => request(`/entities/${encodeURIComponent(id)}/mandate-timeline`),
+  dayStory: (day) => request(`/day/${Number(day)}/story`),
 
   // ---- Packet P9: the human-review queue -------------------------------
   // Every call below is a HUMAN acting. None of them decides anything: the

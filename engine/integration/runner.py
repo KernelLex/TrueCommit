@@ -229,6 +229,18 @@ class WorldRunner:
         self.active_invoice_ids: list[str] = []
         self.disputed_invoice_ids: list[str] = []
 
+        self.day_snapshots: dict[int, dict] = {}
+        """day index -> what the world looked like at the END of that day
+        (packet P10). Pure bookkeeping, taken after the day's beats have run
+        and read by nothing inside the pipeline.
+
+        It exists so the Day Story screen can say "Acme Traders' trust was 0.71
+        THAT day" instead of showing today's posterior next to a three-week-old
+        conversation. The ledger keeps one live `TrustState` per debtor and one
+        live `EntityState` per entity — the honest way to show a past day is to
+        have kept the number, not to re-derive it afterwards and hope the
+        derivation matches."""
+
         # scheduling: day -> ordered list of (kind, entity_id, data)
         self._schedule: dict[int, list[tuple[str, str, dict]]] = {}
         self._pending_promise: dict[str, int] = {}   # entity_id -> promise token
@@ -300,6 +312,16 @@ class WorldRunner:
             self._cart_beats(day)
         if day >= FINAL_SWEEP_DAY:
             self._sweep_idle(day)
+        self._snapshot_day(day)
+
+    def _snapshot_day(self, day: int) -> None:
+        """End-of-day photograph of every entity and every trust posterior.
+        Deep copies on purpose: `EntityState.touches` is a list the ledger keeps
+        appending to, so a shallow reference would quietly rewrite history."""
+        self.day_snapshots[day] = {
+            "entities": {eid: e.model_copy(deep=True) for eid, e in self.ledger.entities.items()},
+            "trust": {did: t.model_copy(deep=True) for did, t in self.ledger.trust.items()},
+        }
 
     def _ts(self, day: int) -> dt.datetime:
         """Day-granular timestamps on purpose: the Sentinel's 48h link window
@@ -683,10 +705,17 @@ class WorldRunner:
         message = self.messenger.send(action, channel, text, rail)
         self.messenger.mark_delivered(message.id)
         self.sentinel.record_send_attempt(action.id, entity_id, action.kind, True, self._ts(day))
-        self._append_thread(entity_id, "out", channel, text, day)
+        threaded = self._append_thread(entity_id, "out", channel, text, day)
         self._audit(
             entity_id, "action", f"{action.kind} dispatched on rail {rail} via {channel}",
-            {"action_id": action.id, "message_id": message.id, "rail": rail,
+            # `message_id` is the MESSENGER QUEUE's id (QM-...), which is what the
+            # rail/delivery side is keyed on; `thread_message_id` is the same
+            # message's id in this entity's conversation (M-SIM-...). Both are
+            # recorded because they are genuinely two different records of one
+            # send, and a reader that conflated them would attach outbound copy
+            # to the wrong place in the thread.
+            {"action_id": action.id, "message_id": message.id,
+             "thread_message_id": threaded.id, "rail": rail,
              "channel": channel, "text": text, **(extra or {})}, day,
         )
 
