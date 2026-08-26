@@ -65,9 +65,18 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 - **Day 8**: three-arm runner (silence / generic reminder / full system, same seed) → metrics.json, DSO/₹recovered/touches-per-recovery (Tier-0 = 0 row)/false-escalation/cost-per-₹, reproducibility-locked
 - **Day 9**: video (master doc Part 5 script) + README · **Day 10**: cleanup + submit
 
-## ⏸ PARKED (user decisions 2026-08-26 — resume only on user signal)
+## ✅ P9 MERGED (2026-08-26) — human-in-the-loop is real
+
+Lead-reviewed on branch, independently reproduced (394/394 tests, click-time `check_bounds` on stale-hold approval, `human_resolution` unreachable via the general event route, pause honored by the advance loop, 45-day distribution + held-queue contents exact), merged to master, pushed (`86513c2`).
+
+- **Confidence gates (master doc §2.3), finally wired:** any mandate/link action born from an extraction confidence <0.90 is held, not sent — `GET /review-queue` lists it, `POST /review-queue/{id}/approve` re-runs `check_bounds()` **at click time** (a stale hold can't dodge a cap hit since creation), `reject` falls back to the link path.
+- **Formal-notice stage:** refuses *both* approve and reject — "mark handled" only. The agent cannot send legal communication even on a human click (law 4, now literally unbreakable via any API path).
+- **Handoff resolution:** `POST /entities/{id}/resolve-handoff` {recovered|written_off} — the ONE way a terminal state can still move, gated to the API layer only (proven unreachable from the event stream / 1000-walk pool).
+- **Merchant pause switch:** `POST /entities/{id}/pause` / `/unpause` — paused threads are skipped by the runner, audited both ways.
+- **The finding worth telling judges:** an unattended queue (nobody clicks fast) recovers ₹23,31,496 because the debtor's weekly touch budget is already spent by the time anyone looks; an attentive merchant who waits for budget gets **₹31,74,725** — bounds working exactly as designed on real data, both numbers labeled.
+
+## ⏸ PARKED (user decision 2026-08-26 — resume only on user signal)
 - **Mandate flow-real enablement**: this test account lacks UPI/eMandate (account-level gate, needs business KYC the user rightly won't fabricate, or an organizer-provisioned hackathon account). Everything documented (BUILD_LOG + TRACK_BAR §0 API-real vs flow-real); harness armed (`scripts/verify_mandate_lifecycle.py`); demo + submission fully intact without it. Optional upgrade path: ask buildathon organizers for an enabled test account.
-- **P9 (human-in-the-loop queue) — COMPLETE but UNREVIEWED, parked on branch `p9-unreviewed`.** The agent finished (claims 394/394 tests: held money-actions at <0.9 confidence with click-time `check_bounds` re-run, clarify gate, approve/reject/resolve/pause API + dashboard buttons, formal-notice draft that refuses both approve AND reject, `human_resolution` as the single API-only terminal exception). Key claimed numbers: 45-day run → 4 queue items, 21 KEPT / 27 HANDOFF / 3 DISPUTED, ₹23,31,496 unattended vs ₹31,74,725 with an attentive merchant (both labeled). **Resume procedure:** lead reviews the branch diff per HANDOVER §3's checklist (re-run suite, verify the four critical claims, reproduce the 45-day numbers), then merges `p9-unreviewed` → master, updates tracking, pushes. Master remains reviewed-code-only until then.
 
 ## ⚠ OPEN RISKS
 - Local-model nondeterminism: 7b flips one message across runs (88.6% quoted as the floor, gate cleared in all observed runs) — mitigation: quote the range, cache pins demo behavior
@@ -96,7 +105,7 @@ All eight beats executed live against the merged code; every number below was pr
 
 ## How to run what exists today
 ```
-./.venv/Scripts/python.exe -m pytest tests/ -q          # 271 tests
+./.venv/Scripts/python.exe -m pytest tests/ -q          # 394 tests
 ./.venv/Scripts/python.exe -m sim.run --days 45 --seed 42   # deterministic world
 ./.venv/Scripts/python.exe -m uvicorn api.main:app          # API on :8000
 ./.venv/Scripts/python.exe -m scripts.verify_razorpay_sandbox  # live sandbox probes (needs .env keys)
