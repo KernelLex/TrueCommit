@@ -21,13 +21,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from data.generate import DEBTOR_BY_ID
 from engine import config as agent_config
 from engine.action import razorpay_client, tts
+from engine.action.contacts import ContactError
 from engine.action.evidence import render_card
 from engine.action.razorpay_client import RazorpayError
 from engine.integration import day_story
-from engine.integration.runner import DEMO_CUSTOMER_CONTACT, DEMO_CUSTOMER_EMAIL, WorldRunner
+from engine.integration.runner import WorldRunner
 from engine.judgment import state_machine
 from engine.judgment.ledger import (
     CLARIFY_CONFIDENCE_GATE,
@@ -147,16 +147,19 @@ def post_event(event: EventIn) -> dict | None:
 
 
 def _entity_row(entity) -> dict:
-    """EntityState (judgment layer, untouched) plus ONE read-only field this
+    """EntityState (judgment layer, untouched) plus two read-only fields this
     composition layer adds on top: `invoice_due`, the real invoice's due date
-    when this entity is a real invoice (`runner.invoices`), else null. Added
-    for packet P13's Demo Console date picker, which shows the real due date
-    it will default to rather than a placeholder — this never mutates or
-    replaces anything EntityState itself reports, it only merges in a sibling
-    fact the judgment layer doesn't carry."""
+    when this entity is a real invoice (`runner.invoices`), else null (packet
+    P13's Demo Console date picker); and `contact` (packet P15), the resolved
+    `{"name", "contact", "email", "source"}` block — a real operator-submitted
+    contact if one was ever submitted for this entity's debtor, else the exact
+    synthetic demo fallback. Neither mutates or replaces anything EntityState
+    itself reports; both merge in a sibling fact the judgment layer doesn't
+    carry."""
     row = json.loads(entity.model_dump_json())
     invoice = runner.invoices.get(entity.entity_id)
     row["invoice_due"] = invoice.due.isoformat() if invoice else None
+    row["contact"] = runner.resolve_contact(entity.entity_id)
     return row
 
 
@@ -472,6 +475,100 @@ def unpause_entity(entity_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Contacts: real debtor/customer identity (packet P15)
+#
+# NO REAL CALL, SMS OR WHATSAPP MESSAGE IS EVER PLACED HERE OR ANYWHERE ELSE
+# IN THIS PROJECT. There is no telephony/SMS-gateway/WhatsApp-Business
+# credential of any kind. Submitting a real name + phone number for a debtor
+# only ever affects two things: (1) what the audit trail / dashboard displays
+# from here on for that debtor, and (2) the `customer.contact` field actually
+# sent to the REAL Razorpay TEST API when a real payment link/mandate is
+# created (`PK_REAL_RAZORPAY=1`, or the demo-console button below) — Razorpay's
+# sandbox genuinely reads that field.
+#
+# Every dispatch point in `WorldRunner` (voice, SMS, message, the real
+# Razorpay call) reads WHO to contact through exactly one function,
+# `WorldRunner.resolve_contact()`, which returns a real submitted contact when
+# one exists for the entity's debtor and the exact synthetic demo fallback
+# otherwise — labelled `source: "operator_submitted"` / `"demo_fallback"` so
+# nothing downstream can present one as the other.
+# ---------------------------------------------------------------------------
+
+
+class ContactIn(BaseModel):
+    name: str
+    phone: str
+
+
+@app.post("/entities/{entity_id}/contact")
+def submit_contact(entity_id: str, body: ContactIn) -> dict:
+    """Record a real name + phone for the debtor/customer behind `entity_id`.
+
+    Applies to every sibling entity that shares this debtor (`_contact_key()`
+    scopes by debtor_id, same precedent as the per-debtor touch cap) — the
+    response's `also_applies_to` names them, so the UI can say "this also
+    applies to INV-004, INV-009" rather than let an operator believe they only
+    just updated the one invoice they were looking at.
+
+    A malformed phone or an empty name is a 422 with the validation message,
+    before anything is stored. Unknown to both `runner.invoices` and
+    `runner.threads`/the ledger's own entities is a 404 — there is nothing to
+    attach a contact to.
+    """
+    if (
+        entity_id not in runner.invoices
+        and entity_id not in ledger.entities
+        and entity_id not in runner.threads
+    ):
+        raise HTTPException(status_code=404, detail="unknown entity")
+
+    key = runner._contact_key(entity_id)
+    try:
+        contact = runner.contacts.submit(key, body.name, body.phone, runner.now())
+    except ContactError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    also_applies_to = sorted(
+        eid for eid in runner.invoices if eid != entity_id and runner._contact_key(eid) == key
+    )
+    runner.audit_manual(
+        entity_id, "operator submitted a real contact record for outreach",
+        {
+            "contact_key": key, "name": contact.name, "phone": contact.phone,
+            "also_applies_to": also_applies_to,
+        },
+    )
+    return {
+        "entity_id": entity_id,
+        "contact_key": key,
+        "contact": json.loads(contact.model_dump_json()),
+        "also_applies_to": also_applies_to,
+    }
+
+
+@app.get("/contacts")
+def list_contacts() -> list[dict]:
+    """One row per entity the ledger knows about (invoice-backed + any cart
+    already registered by day 1's cart beat), each carrying its resolved
+    contact — real submitted or demo fallback — so the dashboard's Contacts
+    panel can render every row without a second round-trip per entity.
+    Read-only: resolves nothing new and decides nothing."""
+    rows = []
+    for entity_id, entity in ledger.entities.items():
+        resolved = runner.resolve_contact(entity_id)
+        rows.append({
+            "entity_id": entity_id,
+            "debtor_id": ledger.debtor_of.get(entity_id),
+            "invoice_amount_inr": entity.invoice_amount_inr,
+            "state": entity.state,
+            "contact_name": resolved["name"],
+            "contact_phone": resolved["contact"],
+            "contact_source": resolved["source"],
+        })
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # Reminders: real voice + real SMS (packet P14)
 #
 # READ THE CONTRAST WITH THE DEMO CONSOLE BELOW, because it is the whole point
@@ -500,15 +597,70 @@ class RemindNowIn(BaseModel):
     `check_bounds()`, and a route that could pass `stage="legal"` would be a
     door onto legal communication the agent must never send (CLAUDE.md law 4).
     `custom_text` is content only — it is spoken/sent verbatim and is never
-    parsed for an amount, a date, or anything else that could move state."""
+    parsed for an amount, a date, or anything else that could move state.
 
-    channel: Literal["voice", "sms"]
+    `"message"` joined `"voice"`/`"sms"` in packet P15: a manual WhatsApp/email
+    nudge on the entity's own thread channel, gated by the identical
+    `check_bounds()` re-check pattern — see `MANUAL_REMINDER_CHANNELS`."""
+
+    channel: Literal["voice", "sms", "message"]
     custom_text: str | None = None
+
+
+def _manual_message_rows(entity_id: str) -> list[dict]:
+    """Manual WhatsApp/email reminders (packet P15's third manual channel)
+    dispatch through the SAME unchanged `elif kind == "message":` branch every
+    autonomous nudge has used since Day 5 — that is the whole point of adding
+    `"message"` to `MANUAL_REMINDER_CHANNELS` rather than inventing a new
+    action kind. Because of that, they are NOT recorded in `runner.reminders`:
+    that list's own contract (since packet P14) is "every voice/SMS reminder
+    this world actually dispatched", and widening it to every message would
+    blur autonomous and manual nudges together in a list nothing else expects
+    to hold autonomous ones.
+
+    Built here instead, additively, from `runner.actions` (every manual
+    `message` Action carries `params["manual"] = True`) plus the matching
+    `_send()` audit entry — which now carries `contact_name`/`contact_phone`/
+    `contact_source` for every dispatched kind (packet P15) — so a manual
+    WhatsApp/email reminder shows up in this history exactly like its voice/
+    SMS siblings, without changing what `runner.reminders` means or touching
+    `WorldRunner._dispatch`."""
+    rows = []
+    for action in runner.actions:
+        if action.entity_id != entity_id or action.kind != "message" or not action.params.get("manual"):
+            continue
+        entry = next(
+            (
+                a for a in reversed(ledger.audit)
+                if a.entity_id == entity_id and a.layer == "action"
+                and a.detail.get("action_id") == action.id
+            ),
+            None,
+        )
+        detail = entry.detail if entry else {}
+        rows.append({
+            "action_id": action.id,
+            "entity_id": entity_id,
+            "channel": "message",
+            "text": detail.get("text"),
+            "manual": True,
+            "stage": action.params.get("stage"),
+            "reason": action.reason,
+            "ts": action.ts.isoformat(),
+            "day": None,
+            "contact_name": detail.get("contact_name"),
+            "contact_phone": detail.get("contact_phone"),
+            "contact_source": detail.get("contact_source"),
+            "rail": detail.get("rail"),
+            "delivery_channel": detail.get("channel"),
+        })
+    return rows
 
 
 @app.post("/entities/{entity_id}/remind-now")
 def remind_now(entity_id: str, body: RemindNowIn) -> dict:
-    """Send a real voice or SMS reminder now — if the bounds allow it.
+    """Send a real voice, SMS, or WhatsApp/email reminder now — if the bounds
+    allow it.
 
     Returns the same `{action, blocked, block_reason}` shape as the approve
     route. A refusal is HTTP 200 with `blocked: true`, not a 4xx: the request
@@ -526,9 +678,14 @@ def remind_now(entity_id: str, body: RemindNowIn) -> dict:
     record = None
     if action is not None:
         runner.dispatch_action(action)
-        record = next(
-            (r for r in reversed(runner.reminders) if r["action_id"] == action.id), None
-        )
+        if body.channel == "message":
+            record = next(
+                (r for r in reversed(_manual_message_rows(entity_id)) if r["action_id"] == action.id), None,
+            )
+        else:
+            record = next(
+                (r for r in reversed(runner.reminders) if r["action_id"] == action.id), None
+            )
     return {
         "entity_id": entity_id,
         "channel": body.channel,
@@ -544,11 +701,20 @@ def get_reminders(entity_id: str) -> dict:
     """Every reminder this entity has: the ones that went out, with their real
     content, and the ones a bound refused.
 
-    Both halves come from stored values, not a re-derivation. Sent reminders are
-    `runner.reminders`, written at dispatch time. Blocked ones are read out of
+    Sent voice/SMS reminders come from `runner.reminders`, written at dispatch
+    time; sent manual WhatsApp/email reminders come from `_manual_message_rows`
+    above (same underlying dispatch, a different bookkeeping list — see that
+    function's docstring for why). Blocked ones are read out of
     `ledger.gate_log` — the append-only record of what `_gate()` actually saw at
     the moment it refused — so the reason shown is the reason the system decided
-    from, never today's recomputation of it (CLAUDE.md law 8).
+    from, never today's recomputation of it (CLAUDE.md law 8). The blocked
+    filter deliberately excludes AUTONOMOUS `message` blocks (an ordinary
+    gentle/firm nudge refused by the touch cap): `message` is both an
+    autonomous kind and, since packet P15, a manual-reminder channel, and only
+    the manual attempts belong on this panel — `voice`/`sms` need no such
+    carve-out because `sms` has no autonomous trigger and a blocked autonomous
+    `voice` escalation has always been shown here (P14), which this leaves
+    unchanged.
     """
     if entity_id not in ledger.entities and entity_id not in runner.threads:
         raise HTTPException(status_code=404, detail="unknown entity")
@@ -557,6 +723,9 @@ def get_reminders(entity_id: str) -> dict:
         {**row, "status": "sent"}
         for row in runner.reminders
         if row["entity_id"] == entity_id
+    ] + [
+        {**row, "status": "sent"}
+        for row in _manual_message_rows(entity_id)
     ]
     blocked = [
         {
@@ -573,6 +742,7 @@ def get_reminders(entity_id: str) -> dict:
         if record.entity_id == entity_id
         and record.kind in MANUAL_REMINDER_CHANNELS
         and not record.allowed
+        and (record.kind != "message" or record.params.get("manual"))
     ]
     rows = sorted([*sent, *blocked], key=lambda r: r["ts"])
     return {
@@ -581,11 +751,16 @@ def get_reminders(entity_id: str) -> dict:
         "audio_url_prefix": VOICE_NOTE_URL_PREFIX,
         "real_tts": runner.real_tts,
         "honesty": {
-            "real": "the generated MP3 audio and the SMS text — both genuine content a human can play or read",
+            "real": (
+                "the generated MP3 audio, the SMS text, and the WhatsApp/email text — all genuine "
+                "content a human can play or read"
+            ),
             "simulated": (
-                "the delivery. No phone is dialled and no handset receives an SMS: this project "
-                "holds no telephony or SMS-gateway credential. Every record below says so in its "
-                "dial_status / send_status field."
+                "the delivery. No phone is dialled and no handset receives an SMS or a WhatsApp "
+                "message: this project holds no telephony, SMS-gateway, or WhatsApp Business "
+                "credential. Every voice/SMS record below says so in its dial_status / send_status "
+                "field; WhatsApp/email messages ride the same simulated queue every message this "
+                "system sends always has (see engine/action/messenger.py)."
             ),
         },
         "reminders": rows,
@@ -657,11 +832,16 @@ def create_mandate_now(entity_id: str, body: CreateMandateNowIn | None = None) -
         raise HTTPException(status_code=404, detail="unknown entity (no invoice on record for it)")
 
     body = body or CreateMandateNowIn()
-    debtor = DEBTOR_BY_ID.get(invoice.debtor_id, {})
+    # packet P15: the middle rung of the fallback chain is now a REAL submitted
+    # contact when one exists for this debtor, still falling back to the exact
+    # synthetic demo values when none was ever submitted (`resolve_contact()`
+    # returns those byte-identically) — the explicit request-body override
+    # above it is untouched.
+    resolved = runner.resolve_contact(entity_id)
     customer = {
-        "name": body.customer_name or debtor.get("name", entity_id),
-        "contact": body.customer_contact or DEMO_CUSTOMER_CONTACT,
-        "email": body.customer_email or DEMO_CUSTOMER_EMAIL,
+        "name": body.customer_name or resolved["name"],
+        "contact": body.customer_contact or resolved["contact"],
+        "email": body.customer_email or resolved["email"],
     }
     debit_date = body.debit_date or invoice.due.isoformat()
     try:
@@ -708,9 +888,18 @@ def create_mandate_now(entity_id: str, body: CreateMandateNowIn | None = None) -
             "customer": customer, "debit_date": debit_date,
             "plan_id": plan.get("id"), "subscription_id": subscription.get("id"),
             "short_url": subscription.get("short_url"), "razorpay_mode": "test",
+            "contact_source": resolved["source"],
         },
     )
-    return {"plan": plan, "subscription": subscription, "customer_used": customer}
+    # `contact_source` (packet P15) tells the dashboard whether the MIDDLE
+    # fallback rung would have been a real submitted contact or the demo
+    # constant, independent of whether the operator also typed an explicit
+    # override in this one-off request body (`customer_used` already shows
+    # exactly what was sent either way).
+    return {
+        "plan": plan, "subscription": subscription,
+        "customer_used": customer, "contact_source": resolved["source"],
+    }
 
 
 @app.get("/trust")

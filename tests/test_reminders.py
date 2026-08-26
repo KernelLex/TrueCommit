@@ -159,6 +159,40 @@ def test_sms_and_message_reach_identical_verdicts_on_every_input():
         )
 
 
+def test_message_reaches_identical_verdicts_as_voice_and_sms_as_a_manual_channel():
+    """packet P15's version of the proof above, for the THIRD manual-reminder
+    channel. `message` has always been in every bound enumeration (it is the
+    original outbound kind every other one was compared against) — this pins
+    that adding it to `MANUAL_REMINDER_CHANNELS` did not need, and did not get,
+    a softer rule than `voice`/`sms` get as manual channels. Pairwise over all
+    three channels rather than a fresh 2000-input run against `message` alone,
+    since `test_sms_and_message_reach_identical_verdicts_on_every_input` above
+    already proves `sms` == `message`; the new ground to cover is `voice`."""
+    rng = random.Random(43)
+    channels = ("sms", "voice", "message")
+    for _ in range(1000):
+        e = sm.EntityState(
+            entity_id="INV-FUZZ2",
+            state=rng.choice(list(sm.State.__args__)),
+            renegotiation_count=rng.randint(0, sm.RENEGOTIATION_CAP + 2),
+            retry_count=rng.randint(0, sm.RETRY_ON_EXECUTION_FAILURE + 2),
+            mandate_refused=rng.random() < 0.3,
+            touches=[NOW - dt.timedelta(days=rng.randint(0, 14)) for _ in range(rng.randint(0, 4))],
+            invoice_amount_inr=rng.choice([None, 40_000, 150_000]),
+        )
+        params = {"stage": rng.choice(["gentle", "firm", "legal", "clarify", None])}
+        debtor_touches = (
+            None if rng.random() < 0.4
+            else [NOW - dt.timedelta(days=rng.randint(0, 14)) for _ in range(rng.randint(0, 5))]
+        )
+        results = {
+            ch: sm.check_bounds(e, ch, dict(params), NOW, debtor_touches) for ch in channels
+        }
+        for a, b in ((channels[i], channels[j]) for i in range(3) for j in range(i + 1, 3)):
+            assert results[a].allowed == results[b].allowed, (a, b, results[a], results[b])
+            assert results[a].reason == results[b].reason, (a, b, results[a], results[b])
+
+
 # ---------------------------------------------------------------------------
 # 3. manual_reminder: the operator path is genuinely gated
 # ---------------------------------------------------------------------------
@@ -226,8 +260,28 @@ def test_manual_reminder_refuses_an_unknown_entity_and_an_unknown_channel():
         ledger.manual_reminder("INV-NOPE", "sms", NOW)
     assert unknown.value.status_code == 404
     with pytest.raises(ReviewQueueError) as channel:
-        ledger.manual_reminder("INV-001", "message", NOW)  # type: ignore[arg-type]
+        # "email" is deliberately NOT a manual-reminder channel: email is a
+        # thread CHANNEL (engine.schemas.MessageChannel), not something an
+        # operator picks as a reminder kind — "message" (WhatsApp/email on the
+        # entity's own thread channel) is the real third option since P15.
+        ledger.manual_reminder("INV-001", "email", NOW)  # type: ignore[arg-type]
     assert channel.value.status_code == 422
+
+
+def test_message_is_now_a_real_manual_reminder_channel():
+    """packet P15: `MANUAL_REMINDER_CHANNELS` grew a third member. This is the
+    direct proof that `manual_reminder("INV-001", "message", NOW)` is accepted
+    (was a 422 before P15 — see the test above, which now uses "email" to keep
+    testing the truly-unknown-channel path)."""
+    ledger = _ledger()
+    out = ledger.manual_reminder("INV-001", "message", NOW)
+    assert out["blocked"] is False and out["block_reason"] is None
+    action = out["action"]
+    assert action.kind == "message"
+    assert action.bounds_checked is True
+    assert action.params["manual"] is True
+    assert action.params["stage"] == "firm"
+    assert ledger.touches_by_debtor["D-ACME"] == [NOW], "a manual message reminder spends a real touch"
 
 
 def test_a_manual_reminder_can_never_carry_a_legal_stage():
@@ -488,7 +542,9 @@ def test_remind_now_sends_a_real_sms_and_lists_it_back(client):
     listed = client.get(f"/entities/{entity_id}/reminders").json()
     assert listed["counts"]["sent"] == 1
     assert listed["reminders"][0]["text"] == body["reminder"]["text"]
-    assert "no telephony or SMS-gateway credential" in listed["honesty"]["simulated"]
+    # packet P15 widened this sentence to also cover the new "message" manual
+    # channel — the SMS-gateway clause is still in there verbatim.
+    assert "no telephony, SMS-gateway, or WhatsApp Business" in listed["honesty"]["simulated"]
 
 
 def test_remind_now_reports_a_bound_refusal_as_a_200_not_an_error(client):
@@ -517,9 +573,31 @@ def test_remind_now_reports_a_bound_refusal_as_a_200_not_an_error(client):
 def test_remind_now_refuses_a_channel_it_does_not_own(client):
     client.post("/advance", json={"days": 1})
     entity_id = _entity_with_budget(client)
+    # "message" is now a real channel (packet P15) — "email" is not, and never
+    # will be: email is a thread CHANNEL, not a reminder kind an operator picks.
     assert client.post(
-        f"/entities/{entity_id}/remind-now", json={"channel": "message"}
+        f"/entities/{entity_id}/remind-now", json={"channel": "email"}
     ).status_code == 422
+
+
+def test_remind_now_sends_a_real_message_and_lists_it_back(client):
+    """packet P15's third manual channel, exercised the way an operator
+    actually drives it: through the API, end to end."""
+    client.post("/advance", json={"days": 1})
+    entity_id = _entity_with_budget(client)
+
+    body = client.post(f"/entities/{entity_id}/remind-now", json={"channel": "message"}).json()
+    assert body["blocked"] is False
+    assert body["action"]["kind"] == "message"
+    assert body["reminder"] is not None
+    assert body["reminder"]["channel"] == "message"
+    assert body["reminder"]["text"]
+
+    listed = client.get(f"/entities/{entity_id}/reminders").json()
+    matching = [r for r in listed["reminders"] if r["action_id"] == body["action"]["id"]]
+    assert len(matching) == 1
+    assert matching[0]["status"] == "sent"
+    assert matching[0]["text"] == body["reminder"]["text"]
 
 
 def test_reminders_404s_on_an_unknown_entity(client):

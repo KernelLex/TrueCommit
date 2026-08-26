@@ -89,12 +89,19 @@ _OUTREACH_ACTION: dict[str, tuple[str, dict]] = {
 
 TOUCH_COUNTED_KINDS = {"link", "mandate_offer", "message", "voice", "sms"}
 
-MANUAL_REMINDER_CHANNELS = ("voice", "sms")
-"""The two kinds `manual_reminder()` will send (packet P14). Both are ordinary
-outbound kinds in `state_machine.OUTBOUND_KINDS` and both are touch-counted
-above — a merchant clicking "Send SMS reminder" spends the SAME weekly budget an
-autonomous nudge would, and can be refused by the SAME bound. See
-`manual_reminder()` for why that is not negotiable."""
+MANUAL_REMINDER_CHANNELS = ("voice", "sms", "message")
+"""The kinds `manual_reminder()` will send. `voice`/`sms` are packet P14;
+`message` joined in packet P15 (real contact identity) so the dashboard's
+Contacts panel can offer WhatsApp/email — the entity's own thread channel —
+as a third manual trigger alongside voice and SMS. All three are ordinary
+outbound kinds in `state_machine.OUTBOUND_KINDS` and all three are
+touch-counted above — a merchant clicking "Send WhatsApp reminder" spends the
+SAME weekly budget an autonomous nudge would, and can be refused by the SAME
+bound. `message` needed no new dispatch code to reach the wire: it is the
+same `ActionKind` the autonomous ladder has emitted since Day 5, so
+`WorldRunner._dispatch`'s existing `elif kind == "message":` branch handles it
+unchanged (see `tests/test_reminders.py`'s message-channel additions). See
+`manual_reminder()` for why the gating is not negotiable."""
 
 MANUAL_REMINDER_STAGE = "firm"
 """The stage a manual reminder is sent at. Fixed here rather than accepted from
@@ -757,7 +764,7 @@ class Ledger:
     def manual_reminder(
         self,
         entity_id: str,
-        channel: Literal["voice", "sms"],
+        channel: Literal["voice", "sms", "message"],
         now: dt.datetime,
         custom_text: str | None = None,
     ) -> dict:

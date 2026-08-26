@@ -130,6 +130,19 @@ export const api = {
       body: JSON.stringify({ channel, custom_text: customText || null }),
     }),
   reminders: (entityId) => request(`/entities/${encodeURIComponent(entityId)}/reminders`),
+
+  // ---- Packet P15: real contact identity (name + phone) ------------------
+  // NO real call/SMS/WhatsApp message is EVER placed by any of this — there is
+  // no telephony/SMS/WhatsApp-Business credential in this project. A submitted
+  // contact only ever changes (a) what the audit trail/dashboard display, and
+  // (b) the `customer.contact` field sent to the REAL Razorpay TEST API when a
+  // real payment link/mandate is created.
+  contacts: () => request('/contacts'),
+  submitContact: (entityId, name, phone) =>
+    request(`/entities/${encodeURIComponent(entityId)}/contact`, {
+      method: 'POST',
+      body: JSON.stringify({ name, phone }),
+    }),
 }
 
 export { ApiError }

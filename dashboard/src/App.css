@@ -1504,3 +1504,171 @@
   max-width: 420px;
   margin: 0.6rem 0;
 }
+
+/* ---------- Contacts (packet P15) ----------
+   A THIRD accent (teal, --realdata), distinct on purpose from --accent/
+   --good/--warn/--danger (agent-judgment UI) and --demo/fuchsia (P13's
+   ungated demo console) — this panel is neither of those: it is real
+   operator-entered PII, never a decision the agent made and never a
+   scripted demo shortcut. */
+
+.contacts-panel {
+  border-color: rgba(45, 212, 191, 0.35);
+  background: linear-gradient(180deg, rgba(45, 212, 191, 0.06), var(--bg-panel) 60%);
+}
+
+.contacts-head {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.contacts-head h2 {
+  margin: 0;
+}
+
+.contacts-badge {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--realdata);
+  background: var(--realdata-soft);
+  border: 1px solid rgba(45, 212, 191, 0.45);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+}
+
+.contacts-disclaimer {
+  margin: 0.6rem 0 0.9rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  background: var(--realdata-soft);
+  border: 1px solid rgba(45, 212, 191, 0.3);
+  color: var(--text-dim);
+  font-size: 0.82rem;
+}
+
+.contacts-filter {
+  width: 100%;
+  max-width: 320px;
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.85rem;
+  font-family: inherit;
+  margin-bottom: 0.8rem;
+}
+
+.contacts-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.contacts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  min-width: 760px;
+}
+
+.contacts-table th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-panel-alt);
+  color: var(--text-faint);
+  text-align: left;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  z-index: 1;
+}
+
+.contacts-table td {
+  padding: 0.45rem 0.7rem;
+  border-bottom: 1px solid var(--border-soft);
+  vertical-align: middle;
+}
+
+.contacts-table tr:last-child td {
+  border-bottom: none;
+}
+
+.contacts-table tr.contacts-row-editing {
+  background: rgba(45, 212, 191, 0.05);
+}
+
+.contact-source-badge {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.contact-source-badge-real {
+  background: var(--realdata-soft);
+  color: var(--realdata);
+  border: 1px solid rgba(45, 212, 191, 0.4);
+}
+
+.contact-source-badge-demo {
+  background: var(--demo-soft);
+  color: var(--demo);
+  border: 1px solid rgba(232, 121, 249, 0.4);
+}
+
+.contacts-table input {
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.3rem 0.45rem;
+  font-size: 0.82rem;
+  font-family: inherit;
+  width: 100%;
+  min-width: 110px;
+}
+
+.contacts-edit-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 150px;
+}
+
+.contacts-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.btn-contacts-save {
+  border-color: rgba(45, 212, 191, 0.5);
+  color: var(--realdata);
+  background: var(--realdata-soft);
+}
+
+.btn-contacts-save:hover:not(:disabled) {
+  background: rgba(45, 212, 191, 0.22);
+}
+
+.btn-tiny {
+  padding: 0.3rem 0.55rem;
+  font-size: 0.72rem;
+}
+
+.contacts-summary-line {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  margin: 0.8rem 0 0;
+}

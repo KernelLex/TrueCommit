@@ -110,6 +110,7 @@ from typing import Any, Callable, Literal
 
 from data.generate import DEBTOR_BY_ID
 from engine.action import razorpay_client
+from engine.action.contacts import ContactBook
 from engine.action.evidence import build_evidence_packet
 from engine.action.messenger import Messenger, Rail
 from engine.action.razorpay_client import RazorpayError
@@ -314,6 +315,12 @@ class WorldRunner:
         self.ledger = Ledger()
         self.messenger = Messenger()
         self.sentinel = Sentinel()
+        self.contacts = ContactBook()
+        """Real operator-submitted debtor/customer contacts (packet P15),
+        keyed by `_contact_key()` — a debtor_id for an invoice, the entity_id
+        itself for a cart. `resolve_contact()` is the ONLY reader; nothing
+        else in this class consults it directly, so there is exactly one
+        place the "real vs demo fallback" decision is made."""
         self.provider = get_provider(provider)
         self.provider_name = self.provider.name
         self.real_razorpay = _real_razorpay_enabled() if real_razorpay is None else real_razorpay
@@ -908,6 +915,7 @@ class WorldRunner:
         detail: dict[str, Any] = {
             "channel": "voice",
             "manual": bool(action.params.get("manual")),
+            **self._contact_fields(entity_id),
             "dial_status": DIAL_STATUS_SIMULATED,
             "dial_note": (
                 "the audio below is real and playable; no phone was dialled — this project "
@@ -958,9 +966,11 @@ class WorldRunner:
         credential this project does not have.
         """
         text = self._reminder_text(action, SMS_TEXT)
+        entity_id = action.entity_id
         detail: dict[str, Any] = {
             "channel": "sms",
             "manual": bool(action.params.get("manual")),
+            **self._contact_fields(entity_id),
             "send_status": SEND_STATUS_SIMULATED,
             "send_note": (
                 "the message text below is real; it reached no handset — this project holds "
@@ -1038,10 +1048,15 @@ class WorldRunner:
             # message's id in this entity's conversation (M-SIM-...). Both are
             # recorded because they are genuinely two different records of one
             # send, and a reader that conflated them would attach outbound copy
-            # to the wrong place in the thread.
+            # to the wrong place in the thread. `contact_*` (packet P15) is who
+            # this dispatch actually addressed — real submitted contact or the
+            # demo fallback — added here so it lands on EVERY dispatched kind
+            # (message/link/mandate_offer included, not only voice/sms, which
+            # already carry it in `extra` and simply confirm the same values).
             {"action_id": action.id, "message_id": message.id,
              "thread_message_id": threaded.id, "rail": rail,
-             "channel": channel, "text": text, **(extra or {})}, day,
+             "channel": channel, "text": text,
+             **self._contact_fields(entity_id), **(extra or {})}, day,
         )
 
     def _build_evidence(self, action: Action, day: int) -> None:
@@ -1084,12 +1099,11 @@ class WorldRunner:
 
     def _real_razorpay_call(self, action: Action, amount: int, day: int) -> dict:
         entity_id = action.entity_id
-        invoice = self.invoices.get(entity_id)
-        debtor = DEBTOR_BY_ID.get(invoice.debtor_id, {}) if invoice else {}
+        resolved = self.resolve_contact(entity_id)
         customer = {
-            "name": debtor.get("name", entity_id),
-            "contact": DEMO_CUSTOMER_CONTACT,
-            "email": DEMO_CUSTOMER_EMAIL,
+            "name": resolved["name"],
+            "contact": resolved["contact"],
+            "email": resolved["email"],
         }
         description = f"Promise Keeper {action.kind} for {entity_id}"
         now = self._ts(day)
@@ -1171,6 +1185,54 @@ class WorldRunner:
         return self.threads.get(entity_id, [])
 
     # -- small helpers -------------------------------------------------------
+
+    # -- contacts: real name/phone, opt-in per debtor (packet P15) -----------
+
+    def _contact_key(self, entity_id: str) -> str:
+        """A debtor_id for a known invoice, else the entity_id itself (Scene-2
+        carts have no debtor record). A contact submitted for one invoice
+        therefore applies to every sibling invoice of the same debtor —
+        the same per-debtor scoping precedent as the touch cap (packet P8),
+        and the reason no debtor can end up with two contradictory phone
+        numbers depending on which of their invoices was clicked on."""
+        invoice = self.invoices.get(entity_id)
+        return invoice.debtor_id if invoice is not None else entity_id
+
+    def resolve_contact(self, entity_id: str) -> dict:
+        """`{"name", "contact", "email", "source"}` — the ONE place every
+        dispatch point (voice/SMS/message/real Razorpay call) reads who to
+        contact. `source` is `"operator_submitted"` once a real contact has
+        been submitted for this entity's debtor, else `"demo_fallback"` —
+        today's exact synthetic behaviour, byte-for-byte, so a run in which
+        nobody ever submits a contact is unchanged (CLAUDE.md law 6/8: the
+        seeded 45-day run's numbers must not move). Email always stays the
+        synthetic demo constant: the operator submits a name + phone only,
+        never an email (out of scope by explicit instruction, not an
+        oversight)."""
+        key = self._contact_key(entity_id)
+        contact = self.contacts.get(key)
+        if contact is not None:
+            return {
+                "name": contact.name, "contact": contact.phone,
+                "email": DEMO_CUSTOMER_EMAIL, "source": "operator_submitted",
+            }
+        invoice = self.invoices.get(entity_id)
+        name = DEBTOR_BY_ID.get(invoice.debtor_id, {}).get("name", entity_id) if invoice else entity_id
+        return {
+            "name": name, "contact": DEMO_CUSTOMER_CONTACT,
+            "email": DEMO_CUSTOMER_EMAIL, "source": "demo_fallback",
+        }
+
+    def _contact_fields(self, entity_id: str) -> dict:
+        """`resolve_contact()`'s result, renamed for merging into a dispatch
+        record next to `channel`/`text`/`dial_status` etc. without colliding
+        with those keys (`resolve_contact()`'s own `"contact"` key would)."""
+        resolved = self.resolve_contact(entity_id)
+        return {
+            "contact_name": resolved["name"],
+            "contact_phone": resolved["contact"],
+            "contact_source": resolved["source"],
+        }
 
     def _persona(self, entity_id: str) -> str:
         invoice = self.invoices[entity_id]

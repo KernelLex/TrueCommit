@@ -18,6 +18,19 @@ function fmtTs(ts) {
   }
 }
 
+// Shared across the Contacts panel, the Reminders panel and the Demo Console
+// (packet P15) — one small badge distinguishing a REAL operator-submitted
+// contact from the synthetic demo fallback, wherever a panel shows who a
+// dispatch was addressed to.
+function ContactSourceBadge({ source }) {
+  const real = source === 'operator_submitted'
+  return (
+    <span className={`contact-source-badge ${real ? 'contact-source-badge-real' : 'contact-source-badge-demo'}`}>
+      {real ? 'real contact on file' : 'demo fallback'}
+    </span>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Demo Console (packet P13) — "Create Mandate Now".
 //
@@ -175,6 +188,10 @@ function DemoConsolePanel({ rows }) {
             <span>plan: {result.plan?.id}</span>
             <span>subscription: {result.subscription?.id}</span>
           </div>
+          <p className="demo-console-hint">
+            Contact on file for this debtor: <ContactSourceBadge source={result.contact_source} /> — any field you
+            typed above overrode it for this one request; leaving a field blank uses whatever is resolved here.
+          </p>
           <details className="timeline-detail">
             <summary>Customer fields actually sent</summary>
             <pre>{JSON.stringify(result.customer_used, null, 2)}</pre>
@@ -204,6 +221,8 @@ function DemoConsolePanel({ rows }) {
 
 const VOICE_NOTE_SRC = (url) => (url ? `/api${url}` : null)
 
+const CHANNEL_LABEL = { voice: 'Voice reminder', sms: 'SMS reminder', message: 'WhatsApp/Message reminder' }
+
 function ReminderRow({ row }) {
   const blocked = row.status === 'blocked'
   const failed = row.audio_generation === 'failed'
@@ -212,11 +231,16 @@ function ReminderRow({ row }) {
   return (
     <li className={`review-item ${blocked ? 'review-item-legal' : ''}`}>
       <div className="review-item-head">
-        <span className="review-entity">{row.channel === 'voice' ? 'Voice reminder' : 'SMS reminder'}</span>
+        <span className="review-entity">{CHANNEL_LABEL[row.channel] || row.channel}</span>
         <span className="review-kind">
           {blocked ? 'blocked by the guardrail' : row.manual ? 'sent — merchant triggered' : 'sent — agent escalation'}
         </span>
       </div>
+      {!blocked && row.contact_phone && (
+        <div className="review-reason">
+          Addressed to: {row.contact_name || '—'} ({row.contact_phone}) <ContactSourceBadge source={row.contact_source} />
+        </div>
+      )}
 
       {blocked ? (
         <div className="review-warn">
@@ -243,9 +267,12 @@ function ReminderRow({ row }) {
             </div>
           )}
           <div className="review-reason">
-            {row.channel === 'voice'
-              ? `Delivery: ${row.dial_status} — the audio is real and playable; no phone was dialled.`
-              : `Delivery: ${row.send_status} — the text is real; it reached no handset.`}
+            {row.channel === 'voice' &&
+              `Delivery: ${row.dial_status} — the audio is real and playable; no phone was dialled.`}
+            {row.channel === 'sms' && `Delivery: ${row.send_status} — the text is real; it reached no handset.`}
+            {row.channel === 'message' &&
+              'Delivery: this rides the same simulated WhatsApp/email queue every message this system sends always ' +
+                'has — no real WhatsApp Business or email credential is used. The text is real.'}
           </div>
         </>
       )}
@@ -297,14 +324,15 @@ function RemindersPanel({ entityId }) {
 
   return (
     <div className="panel">
-      <h2>Reminders — voice &amp; SMS</h2>
+      <h2>Reminders — voice, SMS &amp; WhatsApp/Message</h2>
       <p className="panel-sub">
         Send a real reminder now, or watch the guardrail refuse one. The voice note is genuinely generated audio
-        (gTTS, Hinglish) you can play below, and the SMS text is a real message — but <strong>nothing is
-        delivered</strong>: there is no telephony or SMS-gateway credential in this project, so no phone rings and no
-        handset is reached. Every row says which half is which. Unlike the demo console further down, this button{' '}
-        <strong>does</strong> go through <code>check_bounds()</code>: a manual reminder spends the same weekly touch
-        budget an autonomous escalation does, and can be blocked exactly the same way.
+        (gTTS, Hinglish) you can play below, and the SMS/WhatsApp text is a real message — but <strong>nothing is
+        actually delivered to a phone</strong>: there is no telephony, SMS-gateway, or WhatsApp Business credential in
+        this project, so no phone rings, no SMS reaches a handset, and no WhatsApp message is placed. Every row says
+        which half is which. Unlike the demo console further down, this button <strong>does</strong> go through{' '}
+        <code>check_bounds()</code>: a manual reminder spends the same weekly touch budget an autonomous escalation
+        does, and can be blocked exactly the same way.
       </p>
 
       {error && <div className="banner banner-error">Could not load reminders ({error.message}).</div>}
@@ -312,20 +340,24 @@ function RemindersPanel({ entityId }) {
 
       <div className="reminder-compose">
         <label className="demo-console-field">
-          <span>Custom message (optional)</span>
+          <span>Custom message (optional — voice/SMS only)</span>
           <input
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="leave blank to use the ledger's own template and amount"
           />
           <span className="demo-console-hint">
-            Your words are spoken/sent verbatim. They are never parsed for an amount or a date — the ledger decides
-            those, never text typed into a box (CLAUDE.md law 2).
+            Your words are spoken/sent verbatim on voice and SMS. They are never parsed for an amount or a date — the
+            ledger decides those, never text typed into a box (CLAUDE.md law 2). The WhatsApp/Message button below
+            always sends the ledger's own standard reminder text — it does not read this box.
           </span>
         </label>
         <div className="review-actions">
           <button type="button" className="btn btn-approve" disabled={busy || !entityId} onClick={() => send('voice')}>
             {busy ? 'Sending…' : 'Send Voice Reminder'}
+          </button>
+          <button type="button" className="btn btn-neutral" disabled={busy || !entityId} onClick={() => send('message')}>
+            {busy ? 'Sending…' : 'Send WhatsApp/Message Reminder'}
           </button>
           <button type="button" className="btn btn-neutral" disabled={busy || !entityId} onClick={() => send('sms')}>
             {busy ? 'Sending…' : 'Send SMS Reminder'}
@@ -354,6 +386,246 @@ function RemindersPanel({ entityId }) {
           {counts.sent || 0} sent · {counts.blocked || 0} refused by a bound.
         </p>
       )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Contacts (packet P15) — real name + phone identity, replacing the single
+// synthetic demo contact (+919812345678) that every dispatch point used
+// before an operator submits a real one for a debtor.
+//
+// NO REAL CALL, SMS, OR WHATSAPP MESSAGE IS EVER PLACED — not by this panel,
+// not by anything else in this project. There is no telephony/SMS-gateway/
+// WhatsApp-Business credential of any kind. A submitted number only changes
+// (a) what the audit trail and this dashboard display from here on, and
+// (b) the `customer.contact` field sent to the REAL Razorpay TEST API when a
+// real payment link/mandate is created — Razorpay's sandbox genuinely reads
+// that field. The disclaimer below says this in the UI itself, not only here.
+//
+// One row per entity the ledger knows about (`GET /contacts`), each editable
+// in place and each carrying its own Voice/WhatsApp/SMS trigger buttons —
+// "per-row", the shape the packet brief explicitly allows, rather than
+// funnelling every entity through the single-entity picker the Reminders
+// panel above already uses.
+// ---------------------------------------------------------------------------
+
+function ContactsPanel() {
+  const { data, error, refetch } = usePolling(() => api.contacts(), { intervalMs: 6000 })
+  const rows = useMemo(
+    () => (Array.isArray(data) ? [...data].sort((a, b) => a.entity_id.localeCompare(b.entity_id)) : []),
+    [data],
+  )
+
+  const [filter, setFilter] = useState('')
+  const filtered = useMemo(() => {
+    const q = filter.trim().toLowerCase()
+    if (!q) return rows
+    return rows.filter(
+      (r) =>
+        r.entity_id.toLowerCase().includes(q) ||
+        (r.debtor_id || '').toLowerCase().includes(q) ||
+        (r.contact_name || '').toLowerCase().includes(q),
+    )
+  }, [rows, filter])
+
+  const [editingId, setEditingId] = useState(null)
+  const [editName, setEditName] = useState('')
+  const [editPhone, setEditPhone] = useState('')
+  const [busyId, setBusyId] = useState(null)
+  const [notice, setNotice] = useState(null)
+
+  const startEdit = (row) => {
+    setEditingId(row.entity_id)
+    setEditName(row.contact_name || '')
+    setEditPhone(row.contact_phone || '')
+    setNotice(null)
+  }
+
+  const saveContact = async (entityId) => {
+    if (!editName.trim() || !editPhone.trim() || busyId) return
+    setBusyId(entityId)
+    setNotice(null)
+    try {
+      const res = await api.submitContact(entityId, editName.trim(), editPhone.trim())
+      const also = res.also_applies_to || []
+      setNotice({
+        kind: 'info',
+        text:
+          `${entityId}: real contact saved — ${res.contact.name} (${res.contact.phone}).` +
+          (also.length ? ` Also now applies to: ${also.join(', ')}.` : ''),
+      })
+      setEditingId(null)
+      refetch()
+    } catch (e) {
+      setNotice({ kind: 'error', text: e.body?.detail || e.message })
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const trigger = async (entityId, channel) => {
+    if (busyId) return
+    setBusyId(entityId)
+    setNotice(null)
+    try {
+      const res = await api.remindNow(entityId, channel)
+      setNotice(
+        res.blocked
+          ? { kind: 'error', text: `${entityId}: refused by the guardrail — ${res.block_reason}` }
+          : {
+              kind: 'info',
+              text: `${entityId}: ${CHANNEL_LABEL[channel] || channel} dispatched (${res.action.id}). No real call, SMS, or WhatsApp message was placed — see the disclaimer above.`,
+            },
+      )
+    } catch (e) {
+      setNotice({ kind: 'error', text: e.message })
+    } finally {
+      setBusyId(null)
+      refetch()
+    }
+  }
+
+  return (
+    <div className="panel contacts-panel">
+      <div className="contacts-head">
+        <span className="contacts-badge">REAL CONTACT DATA</span>
+        <h2>Contacts</h2>
+      </div>
+      <p className="panel-sub">
+        Attach a real name + phone number to a debtor or Scene-2 customer. Once submitted it replaces the single
+        synthetic demo contact everywhere it was used for them — every sibling invoice they hold (shown below as
+        "also applies to"), every voice/SMS/WhatsApp reminder, and the <code>customer.contact</code> field on any REAL
+        Razorpay TEST-mode mandate/link created for them (see the Demo Console below).
+      </p>
+      <div className="contacts-disclaimer">
+        No real phone call, SMS, or WhatsApp message is <strong>ever</strong> placed to a number entered here — this
+        project holds no telephony, SMS-gateway, or WhatsApp Business credential. A submitted number only changes what
+        the audit trail and this dashboard display, and the <code>customer.contact</code> field Razorpay's real TEST
+        sandbox receives when a real mandate/link is created.
+      </div>
+
+      {error && <div className="banner banner-error">Could not load contacts ({error.message}).</div>}
+      {notice && <div className={`banner banner-${notice.kind === 'error' ? 'error' : 'info'}`}>{notice.text}</div>}
+
+      <input
+        className="contacts-filter"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        placeholder="Filter by entity id, debtor id, or contact name…"
+      />
+
+      {filtered.length === 0 ? (
+        <div className="empty-state">No entities match.</div>
+      ) : (
+        <div className="contacts-table-wrap">
+          <table className="contacts-table">
+            <thead>
+              <tr>
+                <th>Entity</th>
+                <th>Debtor</th>
+                <th>Amount</th>
+                <th>State</th>
+                <th>Contact</th>
+                <th>Source</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((row) => {
+                const isEditing = editingId === row.entity_id
+                const busy = busyId === row.entity_id
+                return (
+                  <tr key={row.entity_id} className={isEditing ? 'contacts-row-editing' : ''}>
+                    <td>
+                      <code>{row.entity_id}</code>
+                    </td>
+                    <td>{row.debtor_id || '—'}</td>
+                    <td>
+                      {row.invoice_amount_inr != null ? `Rs.${row.invoice_amount_inr.toLocaleString('en-IN')}` : '—'}
+                    </td>
+                    <td>{row.state}</td>
+                    <td>
+                      {isEditing ? (
+                        <div className="contacts-edit-fields">
+                          <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Name" />
+                          <input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} placeholder="Phone" />
+                        </div>
+                      ) : (
+                        <span>
+                          {row.contact_name} — {row.contact_phone}
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      <ContactSourceBadge source={row.contact_source} />
+                    </td>
+                    <td>
+                      <div className="contacts-row-actions">
+                        {isEditing ? (
+                          <>
+                            <button
+                              type="button"
+                              className="btn btn-tiny btn-contacts-save"
+                              disabled={busy || !editName.trim() || !editPhone.trim()}
+                              onClick={() => saveContact(row.entity_id)}
+                            >
+                              {busy ? 'Saving…' : 'Save'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-tiny btn-neutral"
+                              disabled={busy}
+                              onClick={() => setEditingId(null)}
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <button type="button" className="btn btn-tiny btn-neutral" onClick={() => startEdit(row)}>
+                            Edit contact
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn-tiny btn-approve"
+                          disabled={busy}
+                          onClick={() => trigger(row.entity_id, 'voice')}
+                          title="Manual voice reminder — real generated audio, no phone dialled"
+                        >
+                          Voice
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-tiny btn-neutral"
+                          disabled={busy}
+                          onClick={() => trigger(row.entity_id, 'message')}
+                          title="Manual WhatsApp/email reminder — simulated queue, no real WhatsApp/email sent"
+                        >
+                          WhatsApp/Msg
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-tiny btn-neutral"
+                          disabled={busy}
+                          onClick={() => trigger(row.entity_id, 'sms')}
+                          title="Manual SMS reminder — real text, no handset reached"
+                        >
+                          SMS
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="contacts-summary-line">
+        {rows.length} entities · {rows.filter((r) => r.contact_source === 'operator_submitted').length} with a real
+        contact on file.
+      </p>
     </div>
   )
 }
@@ -411,6 +683,8 @@ export default function EntityTimelineScreen() {
       </div>
 
       {error && <div className="banner banner-error">Could not load audit trail ({error.message}).</div>}
+
+      <ContactsPanel />
 
       <RemindersPanel entityId={activeId} />
 

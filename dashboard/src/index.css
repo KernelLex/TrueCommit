@@ -20,6 +20,12 @@
   --muted-strong: #94a3b8;
   --demo: #e879f9;
   --demo-soft: rgba(232, 121, 249, 0.14);
+  /* Packet P15 (Contacts — real name/phone identity): teal, deliberately a
+     THIRD accent distinct from --accent/--good/--warn/--danger (agent
+     judgment UI) and --demo/fuchsia (P13's ungated demo console), so all
+     three visual languages stay tellable apart at a glance. */
+  --realdata: #2dd4bf;
+  --realdata-soft: rgba(45, 212, 191, 0.14);
 
   --mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
   --sans: 'Segoe UI', system-ui, Roboto, Arial, sans-serif;
