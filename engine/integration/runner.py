@@ -171,6 +171,14 @@ ESCALATION_TEXT = {
     "gentle": "Hi — a quick reminder that Rs.{amount:,} against {entity_id} is past its due date. When can we expect it?",
     "firm": "Firm reminder: Rs.{amount:,} against {entity_id} is still outstanding. Please confirm a payment date.",
     "legal": "[merchant review required] Formal notice draft for {entity_id}, Rs.{amount:,}.",
+    # Master doc §2.3's clarify gate. ONE question, and it asks for exactly the
+    # two fields the extractor could not read with confidence — an amount and a
+    # date — while quoting the LEDGER's outstanding figure, never the one
+    # perception thought it saw.
+    "clarify": (
+        "Just so we get this right before setting anything up: how much are you clearing "
+        "against {entity_id}, and on which date? (Rs.{amount:,} is outstanding.)"
+    ),
 }
 VOICE_TEXT = "[voice note, Hinglish] {entity_id} ka Rs.{amount:,} abhi tak pending hai, please clear kara dijiye."
 
@@ -346,6 +354,16 @@ class WorldRunner:
         for entity_id in self.active_invoice_ids:
             entity = self.ledger.entities.get(entity_id)
             if entity is None or entity.state in TERMINAL_STATES:
+                continue
+            if self.ledger.paused.get(entity_id):
+                # The merchant kill-switch (master doc §3.6). The ledger would
+                # refuse the action anyway — `_gate()` blocks every outbound
+                # kind on a paused entity — but stopping here means the persona
+                # is never asked to react either, so a paused thread produces no
+                # simulated reply to a message that was never sent. The skip is
+                # audited: a paused thread is visibly quiet, not silently dead.
+                self._audit(entity_id, "sentinel", "outreach skipped: thread paused by merchant",
+                            {"stage": stage, "state": entity.state}, day)
                 continue
             if entity_id in self._mandate_pending or entity_id in self._pending_promise:
                 continue  # a commitment is already live; chasing it now would be a wasted touch
@@ -572,6 +590,24 @@ class WorldRunner:
                 "escalation_exhausted", entity_id,
                 {"reason": "touch schedule exhausted, no live commitment"}, day,
             )
+
+    # -- the human side of the loop (packet P9) ------------------------------
+
+    def now(self) -> dt.datetime:
+        """The current virtual instant — what "now" means to a merchant
+        clicking a review-queue button while the world sits at day N. The API's
+        review-queue routes hand this to the ledger so a human click is
+        timestamped inside the same clock the run uses, and so the touch window
+        re-checked at approval time is measured against it."""
+        return self._ts(self.day)
+
+    def dispatch_action(self, action: Action) -> None:
+        """Send an Action the LEDGER produced OUTSIDE the event loop — i.e. one
+        a human approved (or the link a rejection fell back to). This module
+        still constructs nothing: it is handed a finished, bounds-checked Action
+        and does exactly what `_emit` does with one."""
+        self.actions.append(action)
+        self._dispatch(action, self.day)
 
     # -- the one way anything happens ---------------------------------------
 
@@ -853,6 +889,9 @@ class WorldRunner:
             "audit_entries": len(self.ledger.audit),
             "dead_letter": len(self.sentinel.dead_letter),
             "tier0_zero_touch_recoveries": zero_touch,
+            "held_actions_pending": len(self.ledger.pending_held_actions()),
+            "held_actions_total": len(self.ledger.held_actions),
+            "paused_threads": len(self.ledger.paused_entities()),
         }
 
     def world_summary(self) -> dict:

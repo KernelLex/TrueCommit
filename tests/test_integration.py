@@ -332,6 +332,152 @@ def test_advance_rejects_out_of_range_days(days: int):
 
 
 # ---------------------------------------------------------------------------
+# (d2) the human in the loop, inside a real run (packet P9)
+# ---------------------------------------------------------------------------
+
+
+def test_the_45_day_run_really_holds_money_actions_for_a_human(world: WorldRunner):
+    """The money gate, exercised by the run rather than by a fixture: the
+    heuristic extractor's L3 reads land at confidence 0.78, under the 0.90 gate,
+    and every money action they would have triggered is in the queue instead of
+    on the wire."""
+    held = world.ledger.held_actions
+    assert held, "a 45-day run held nothing — the money gate never fired"
+
+    money = [h for h in held if h.sendable]
+    assert money and all("money gate" in h.reason for h in money)
+    assert {h.action.kind for h in money} <= {"mandate_offer", "link"}
+
+    for hold in held:
+        assert hold.action.bounds_checked is False
+        assert hold.action.id not in {a.id for a in world.actions}, "a held action reached the wire"
+        assert hold.action.params.get("amount_inr") in (
+            None, world.ledger.entities[hold.entity_id].invoice_amount_inr,
+        ), "law 2 still holds for an action nobody has approved yet"
+
+    # every hold is in the append-only trail, and none of them looks emitted
+    logged = {e.detail["held_id"] for e in world.ledger.audit
+              if e.summary == "action held for human approval"}
+    assert logged == {h.id for h in held}
+
+
+def test_the_formal_notice_draft_reaches_the_queue_and_never_the_wire(world: WorldRunner):
+    """Master doc §3.6's second reason the queue exists. The bound already
+    refused to SEND it; without the queue the merchant would simply never see
+    the draft, and "compliant escalation" would end in a silence."""
+    drafts = [h for h in world.ledger.held_actions if not h.sendable]
+    assert drafts, "the ladder reached ESCALATE_3 but no draft reached the merchant"
+    for draft in drafts:
+        assert draft.action.params["stage"] == "legal"
+        assert world.ledger.entities[draft.entity_id].state == "HUMAN_HANDOFF"
+
+    assert not [a for a in world.actions if a.params.get("stage") == "legal"]
+    assert not [m for m in world.messenger.queue if "merchant review required" in m.text]
+
+
+def test_the_runner_never_emits_a_human_resolution_event(world: WorldRunner):
+    """The containment half of the terminal-state exception (see
+    `tests/test_state_machine.py::ALL_EVENT_TYPES`). The pipeline's event
+    vocabulary does not contain it, so the fuzz pool that excludes it is
+    modelling the real thing."""
+    from engine.judgment import state_machine as sm
+
+    assert sm.HUMAN_RESOLUTION_EVENT not in {e.type for e in world.events}
+    assert not [
+        a for a in world.ledger.audit if a.summary.startswith("human resolution:")
+    ]
+
+
+def test_no_action_is_ever_constructed_outside_the_ledger(world: WorldRunner):
+    """Every Action id in the run — emitted or held — comes out of the ledger's
+    single `_action_seq`, so the ids form one gapless sequence. A runner or API
+    layer that minted its own would show up here as a duplicate or a gap."""
+    ids = [a.id for a in world.actions] + [h.action.id for h in world.ledger.held_actions]
+    numbers = sorted(int(i.split("-")[1]) for i in ids)
+    assert len(numbers) == len(set(numbers))
+    assert numbers == list(range(1, len(numbers) + 1))
+
+
+def test_pausing_a_thread_stops_its_outreach_across_a_whole_run():
+    """The merchant kill-switch, measured against a control run of the same
+    world: the paused invoice receives literally nothing for 45 days, while the
+    unpaused copy of it is chased normally."""
+    control = WorldRunner(real_razorpay=False)
+    control.advance(RUN_DAYS)
+    entity_id = next(
+        eid for eid in control.active_invoice_ids if control.messenger.for_entity(eid)
+    )
+
+    paused = WorldRunner(real_razorpay=False)
+    paused.ledger.set_paused(entity_id, True, paused.now())
+    paused.advance(RUN_DAYS)
+
+    assert control.messenger.for_entity(entity_id), "control run says this invoice IS normally chased"
+    assert paused.messenger.for_entity(entity_id) == []
+    assert paused.ledger.entities[entity_id].touches == []
+
+    skips = [
+        a for a in paused.ledger.audit
+        if a.entity_id == entity_id and a.summary.startswith("outreach skipped: thread paused")
+    ]
+    assert skips, "a paused thread must be visibly quiet in the trail, not silently dead"
+
+    # law 5 still holds: pausing stops outreach, it does not stop TERMINATION
+    assert paused.ledger.entities[entity_id].state in TERMINAL_STATES
+
+
+def test_the_confidence_gates_are_deterministic(world: WorldRunner):
+    """CLAUDE.md law 6 covers the gates too: given the heuristic provider, the
+    same run holds the same actions for the same reasons, in the same order."""
+    second = WorldRunner(real_razorpay=False)
+    second.advance(RUN_DAYS)
+    assert [(h.id, h.entity_id, h.action.kind, h.reason, h.sendable) for h in second.ledger.held_actions] == [
+        (h.id, h.entity_id, h.action.kind, h.reason, h.sendable) for h in world.ledger.held_actions
+    ]
+    assert second.ledger.clarify_count == world.ledger.clarify_count
+
+
+def test_a_low_confidence_extraction_reaches_the_clarify_gate_in_the_real_pipeline():
+    """The heuristic provider's confidence table bottoms out at 0.78 for the
+    levels the runner books as promises, so a 45-day heuristic run produces
+    ZERO clarify messages — recorded honestly in tracking/BUILD_QUALITY.md.
+    That is a property of one provider's numbers, not of the wiring, so the
+    wire is proven here by pushing a genuinely ambiguous read through the real
+    runner: real ledger, real bounds, real dispatch, real message on the rail.
+    """
+    runner = WorldRunner(real_razorpay=False)
+    runner.advance(1)
+    # ...on a debtor with budget left this week, so the only thing that can
+    # decide the outcome here is the confidence gate.
+    now = runner.now()
+    entity_id = next(
+        eid for eid in runner.active_invoice_ids
+        if runner.ledger.entities[eid].state not in TERMINAL_STATES
+        and sum(1 for t in runner.ledger._debtor_touches(eid)
+                if (now - t).days < TOUCH_WINDOW_DAYS) < MAX_TOUCHES_PER_WEEK
+    )
+
+    action = runner.ledger.process_event(
+        "extraction_received", entity_id,
+        {"amount_inr": 40000, "confidence": 0.55, "level": "L4"}, runner.now(),
+    )
+    assert action is not None and action.params["stage"] == "clarify"
+    runner.dispatch_action(action)
+
+    sent = runner.messenger.for_entity(entity_id)[-1]
+    assert "which date" in sent.text
+    assert f"Rs.{runner.invoices[entity_id].amount_inr:,}" in sent.text, "the LEDGER's figure, not the read one"
+    assert runner.ledger.clarify_count[entity_id] == 1
+
+    # ...and the agent will not ask again by itself
+    assert runner.ledger.process_event(
+        "extraction_received", entity_id,
+        {"amount_inr": 40000, "confidence": 0.51, "level": "L4"}, runner.now(),
+    ) is None
+    assert runner.ledger.pending_held_actions()[-1].reason.startswith("still ambiguous")
+
+
+# ---------------------------------------------------------------------------
 # (e) offline by default
 # ---------------------------------------------------------------------------
 

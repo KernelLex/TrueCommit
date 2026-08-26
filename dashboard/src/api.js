@@ -63,6 +63,28 @@ export const api = {
   // status — everything the System Health "Agent parameters" and live
   // status cards render comes from this one call.
   config: () => request('/config'),
+
+  // ---- Packet P9: the human-review queue -------------------------------
+  // Every call below is a HUMAN acting. None of them decides anything: the
+  // ledger audits the click before it takes effect and re-runs check_bounds()
+  // on anything it is asked to send, so an approve can legitimately come back
+  // { blocked: true } and the screen has to show that rather than assume the
+  // click worked.
+  reviewQueue: () => request('/review-queue'),
+  approveHeld: (id) => request(`/review-queue/${encodeURIComponent(id)}/approve`, { method: 'POST' }),
+  rejectHeld: (id) => request(`/review-queue/${encodeURIComponent(id)}/reject`, { method: 'POST' }),
+  markHeldHandled: (id, note) =>
+    request(`/review-queue/${encodeURIComponent(id)}/mark-handled`, {
+      method: 'POST',
+      body: JSON.stringify({ note: note || null }),
+    }),
+  resolveHandoff: (entityId, resolution) =>
+    request(`/entities/${encodeURIComponent(entityId)}/resolve-handoff`, {
+      method: 'POST',
+      body: JSON.stringify({ resolution }),
+    }),
+  pauseEntity: (entityId) => request(`/entities/${encodeURIComponent(entityId)}/pause`, { method: 'POST' }),
+  unpauseEntity: (entityId) => request(`/entities/${encodeURIComponent(entityId)}/unpause`, { method: 'POST' }),
 }
 
 export { ApiError }

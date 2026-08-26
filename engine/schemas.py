@@ -183,3 +183,45 @@ class AuditEntry(BaseModel):
     summary: str
     detail: dict[str, Any] = Field(default_factory=dict)
     ts: dt.datetime
+
+
+# ---------------------------------------------------------------------------
+# Human-in-the-loop (master doc §2.3 confidence gates, §3.6 approval queue)
+# ---------------------------------------------------------------------------
+
+HeldStatus = Literal["pending", "approved", "rejected", "blocked", "handled"]
+
+
+class HeldAction(BaseModel):
+    """An Action the ledger DECIDED on and then deliberately did NOT emit,
+    because master doc §2.3 requires a human click first.
+
+    `action` is a real `Action` built by the ledger (nothing constructs an
+    Action anywhere else) carrying `bounds_checked=False` — and that flag is
+    the honest one: a held action has NOT passed the gate, because
+    `check_bounds()` is re-run at APPROVAL time, not at creation time. A hold
+    created on day 3 and approved on day 9 is measured against the debtor's
+    day-9 touch budget, so a stale hold can never smuggle an action past a cap
+    that has since been hit.
+
+    `sendable=False` marks the one item in the queue that has no approve
+    button at all: the formal-notice draft. CLAUDE.md law 4 says the agent
+    never sends legal communication — not even on a human click. The merchant
+    sends it themselves, outside the system, and marks the item handled.
+    """
+
+    id: str
+    entity_id: str
+    action: Action
+    reason: str
+    """Why it was held, in the merchant's words — e.g. "confidence 0.82 < 0.90
+    money gate"."""
+    ts: dt.datetime
+    status: HeldStatus = "pending"
+    sendable: bool = True
+    label: str | None = None
+    resolved_ts: dt.datetime | None = None
+    resolution_note: str | None = None
+    emitted_action_id: str | None = None
+    """The id of the Action actually emitted when a human approved this — None
+    unless `status == "approved"`."""

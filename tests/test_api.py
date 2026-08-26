@@ -51,6 +51,48 @@ def test_list_entities_returns_every_loaded_invoice():
         assert "state" in row and "invoice_amount_inr" in row
 
 
+def test_review_queue_routes_exist_and_report_the_gates_they_enforce():
+    """Shape check for the P9 surface. The behaviour behind each route is
+    covered in tests/test_review_queue.py; this is the "is it wired into THIS
+    app" half, alongside the other route-listing tests in this file."""
+    with TestClient(app) as c:
+        body = c.get("/review-queue").json()
+        assert set(body) >= {
+            "held_actions", "handoffs", "disputes", "paused", "counts", "gates",
+        }
+        # the screen never hardcodes a threshold — it reads the ones in force
+        assert body["gates"]["money_action_confidence"] == 0.90
+        assert body["gates"]["clarify_confidence"] == 0.75
+
+        paths = {r.path for r in app.routes}
+        assert {
+            "/review-queue",
+            "/review-queue/{held_id}/approve",
+            "/review-queue/{held_id}/reject",
+            "/review-queue/{held_id}/mark-handled",
+            "/entities/{entity_id}/resolve-handoff",
+            "/entities/{entity_id}/pause",
+            "/entities/{entity_id}/unpause",
+        } <= paths
+
+
+def test_the_manual_event_route_refuses_the_terminal_state_exception():
+    """`POST /events` stays the general-purpose injection door for every event
+    the pipeline produces — and is closed to the one event that can move a
+    terminal state, which has its own route with its own preconditions."""
+    with TestClient(app) as c:
+        r = c.post("/events", json={
+            "type": "human_resolution", "entity_id": "INV-001",
+            "payload": {"resolution": "recovered"},
+        })
+        assert r.status_code == 400
+        assert "resolve-handoff" in r.json()["detail"]
+        # every other event type still goes through untouched
+        assert c.post("/events", json={
+            "type": "invoice_triaged", "entity_id": "INV-001", "payload": {},
+        }).status_code == 200
+
+
 def test_list_trust_matches_single_debtor_reads():
     with TestClient(app) as c:
         # INV-006 -> D-02, untouched by the earlier tests in this module (they

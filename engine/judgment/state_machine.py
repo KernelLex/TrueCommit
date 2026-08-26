@@ -45,6 +45,36 @@ State = Literal[
 TERMINAL_STATES: set[State] = {"KEPT", "CLEAN_LOSS", "HUMAN_HANDOFF", "DISPUTED"}
 ESCALATE_STATES: list[State] = ["ESCALATE_1", "ESCALATE_2", "ESCALATE_3", "ESCALATE_4"]
 
+HUMAN_RESOLVABLE_STATES: set[State] = {"HUMAN_HANDOFF", "DISPUTED"}
+"""The two terminal states a HUMAN is allowed to close out — see
+`HUMAN_RESOLUTION_EVENT` below. KEPT and CLEAN_LOSS are already resolved
+outcomes and stay immutable to everything, including this."""
+
+HUMAN_RESOLUTION_EVENT = "human_resolution"
+"""THE ONE EXCEPTION to terminal-state immutability.
+
+Everywhere else in this module a terminal state is a dead end: `transition()`
+returns unchanged for every event once `state in TERMINAL_STATES`, and there
+are parametrized tests that bombard each terminal state with the whole event
+vocabulary to prove it. This single event type is exempt, and only from
+HUMAN_HANDOFF / DISPUTED, because it does not represent the AGENT deciding
+anything — it represents a human merchant telling the system how the case they
+were handed actually ended ("we got paid" / "we wrote it off"). Without it a
+handoff is a state the system can never close, which contradicts CLAUDE.md law
+5's "no silent deaths" just as badly as a loop would.
+
+Blast radius is contained by construction, not by convention:
+  * no code path inside `engine/` ever emits it — the integration runner's
+    event vocabulary does not contain it (there is a test),
+  * `POST /events` explicitly REFUSES it (400), so it cannot be injected
+    through the general-purpose manual event route (there is a test),
+  * the only producer is `Ledger.resolve_handoff()`, reached only from
+    `POST /entities/{id}/resolve-handoff`, which additionally refuses any
+    entity that is not currently an open handoff/dispute.
+"""
+
+HUMAN_RESOLUTIONS: dict[str, State] = {"recovered": "KEPT", "written_off": "CLEAN_LOSS"}
+
 TouchKind = Literal["link", "mandate_offer", "message", "voice"]
 # Actions that go TO the debtor/customer and are what "no further outbound
 # actions" (BUILD.md Day-5 dispute test) means to block. evidence_packet /
@@ -143,7 +173,14 @@ def transition(entity: EntityState, event_type: str, payload: dict[str, Any], no
     entity.step_count += 1
 
     if entity.state in TERMINAL_STATES:
-        return entity  # dead end reached; nothing moves it further
+        # THE ONE EXCEPTION (see HUMAN_RESOLUTION_EVENT above): a human closing
+        # out a handoff/dispute they were handed. Every other event, from every
+        # other source, leaves a terminal state exactly where it is.
+        if event_type == HUMAN_RESOLUTION_EVENT and entity.state in HUMAN_RESOLVABLE_STATES:
+            resolved = HUMAN_RESOLUTIONS.get(str(payload.get("resolution")))
+            if resolved is not None:
+                entity.state = resolved
+        return entity  # dead end reached; nothing else moves it further
 
     if event_type == "dispute_raised":
         entity.state = "DISPUTED"
