@@ -11,6 +11,11 @@ $api = Start-Process -PassThru -NoNewWindow -FilePath ".venv\Scripts\python.exe"
 
 Start-Sleep -Seconds 3
 
+if ($api.HasExited) {
+    Write-Host "API process exited immediately (exit code $($api.ExitCode)) - check that setup.ps1 completed successfully." -ForegroundColor Red
+    exit 1
+}
+
 Write-Host "Starting dashboard (Ctrl+C to stop both)..."
 try {
     Push-Location dashboard
