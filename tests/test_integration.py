@@ -35,7 +35,7 @@ RUN_DAYS = 45
 @pytest.fixture(scope="module")
 def world() -> WorldRunner:
     """One 45-day run, shared read-only across the assertions below."""
-    runner = WorldRunner(real_razorpay=False)
+    runner = WorldRunner(real_razorpay=False, real_tts=False)
     runner.advance(RUN_DAYS)
     return runner
 
@@ -163,8 +163,8 @@ def test_messages_are_rail_labelled(world: WorldRunner):
 
 
 def test_two_fresh_runners_produce_identical_audit_trails():
-    first = WorldRunner(real_razorpay=False)
-    second = WorldRunner(real_razorpay=False)
+    first = WorldRunner(real_razorpay=False, real_tts=False)
+    second = WorldRunner(real_razorpay=False, real_tts=False)
     first.advance(RUN_DAYS)
     second.advance(RUN_DAYS)
 
@@ -181,9 +181,9 @@ def test_two_fresh_runners_produce_identical_audit_trails():
 
 def test_the_same_days_split_differently_land_on_the_same_world():
     """"Advance 1 Day" pressed 12 times == "Run to Day 12" once."""
-    one_shot = WorldRunner(real_razorpay=False)
+    one_shot = WorldRunner(real_razorpay=False, real_tts=False)
     one_shot.advance(12)
-    stepwise = WorldRunner(real_razorpay=False)
+    stepwise = WorldRunner(real_razorpay=False, real_tts=False)
     for _ in range(12):
         stepwise.advance(1)
     assert one_shot.audit_summaries() == stepwise.audit_summaries()
@@ -671,14 +671,25 @@ def test_no_action_is_ever_constructed_outside_the_ledger(world: WorldRunner):
 def test_pausing_a_thread_stops_its_outreach_across_a_whole_run():
     """The merchant kill-switch, measured against a control run of the same
     world: the paused invoice receives literally nothing for 45 days, while the
-    unpaused copy of it is chased normally."""
-    control = WorldRunner(real_razorpay=False)
+    unpaused copy of it is chased normally.
+
+    `real_tts=False` on both runners is not decorative: without it, whichever
+    entity ends up paused shifts the shared RNG stream for every other entity
+    (pausing one debtor means their persona draws never happen, so everyone
+    after them draws different numbers) — and on at least one seed this
+    genuinely walked the run into producing a real `voice` action, which
+    made a real network call to Google's gTTS endpoint and, on a machine
+    where the IPv6 route to Google black-holes, blocked for ~20s waiting out
+    that timeout before falling back to IPv4. Found live 2026-08-28 profiling
+    an unrelated report — see tracking/BUILD_LOG.md.
+    """
+    control = WorldRunner(real_razorpay=False, real_tts=False)
     control.advance(RUN_DAYS)
     entity_id = next(
         eid for eid in control.active_invoice_ids if control.messenger.for_entity(eid)
     )
 
-    paused = WorldRunner(real_razorpay=False)
+    paused = WorldRunner(real_razorpay=False, real_tts=False)
     paused.ledger.set_paused(entity_id, True, paused.now())
     paused.advance(RUN_DAYS)
 
@@ -699,7 +710,7 @@ def test_pausing_a_thread_stops_its_outreach_across_a_whole_run():
 def test_the_confidence_gates_are_deterministic(world: WorldRunner):
     """CLAUDE.md law 6 covers the gates too: given the heuristic provider, the
     same run holds the same actions for the same reasons, in the same order."""
-    second = WorldRunner(real_razorpay=False)
+    second = WorldRunner(real_razorpay=False, real_tts=False)
     second.advance(RUN_DAYS)
     assert [(h.id, h.entity_id, h.action.kind, h.reason, h.sendable) for h in second.ledger.held_actions] == [
         (h.id, h.entity_id, h.action.kind, h.reason, h.sendable) for h in world.ledger.held_actions
@@ -715,7 +726,7 @@ def test_a_low_confidence_extraction_reaches_the_clarify_gate_in_the_real_pipeli
     wire is proven here by pushing a genuinely ambiguous read through the real
     runner: real ledger, real bounds, real dispatch, real message on the rail.
     """
-    runner = WorldRunner(real_razorpay=False)
+    runner = WorldRunner(real_razorpay=False, real_tts=False)
     runner.advance(1)
     # ...on a debtor with budget left this week, so the only thing that can
     # decide the outcome here is the confidence gate.
@@ -817,7 +828,7 @@ def test_real_razorpay_budget_is_one_link_and_one_mandate_per_run(monkeypatch):
     monkeypatch.setattr(razorpay_client, "create_payment_link", fake_link)
     monkeypatch.setattr(razorpay_client, "create_mandate_registration_link", fake_mandate)
 
-    runner = WorldRunner(real_razorpay=True)
+    runner = WorldRunner(real_razorpay=True, real_tts=False)
     runner.advance(RUN_DAYS)
 
     assert calls.count("link") == 1
@@ -845,7 +856,7 @@ def test_a_failing_razorpay_call_retries_then_dead_letters_then_falls_back(monke
     monkeypatch.setattr(razorpay_client, "create_payment_link", always_fails)
     monkeypatch.setattr(razorpay_client, "create_mandate_registration_link", always_fails)
 
-    runner = WorldRunner(real_razorpay=True)
+    runner = WorldRunner(real_razorpay=True, real_tts=False)
     runner.advance(10)
 
     assert len(attempts) > 0

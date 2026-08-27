@@ -753,6 +753,22 @@ def telephony_twiml(text: str) -> Response:
 # call is attempted.
 # ---------------------------------------------------------------------------
 
+def _real_future_debit_date(days_ahead: int = 7) -> str:
+    """A real Razorpay `start_at`/`debit_date` must be in the future relative
+    to REAL wall-clock time. This project's simulated invoices are, by
+    design, already overdue — `invoice.due` sits in the past relative to
+    both the virtual clock and the real calendar (that is the whole premise
+    of a recovery scenario) — so using that field directly for a REAL
+    Razorpay call gets rejected outright: a live IVR call hit exactly this,
+    "start_at cannot be lesser than the current time.", a genuine 400 (see
+    tracking/BUILD_LOG.md, 2026-08-27). `days_ahead` mirrors the exact
+    offset already verified live and accepted (tracking/BUILD_LOG.md's
+    "mandate rail pivot" entry, `sub_TUM5ilVyr8rpZZ`, `start_at` 7 days out).
+    Real wall-clock `date.today()` on purpose, never the simulated clock —
+    a REAL debit commitment is not a virtual-day concept."""
+    return (dt.date.today() + dt.timedelta(days=days_ahead)).isoformat()
+
+
 _IVR_DIGIT_TO_KIND: dict[str, Literal["mandate_offer", "link"]] = {"1": "mandate_offer", "2": "link"}
 
 _IVR_MENU_PROMPT = {
@@ -846,13 +862,14 @@ async def telephony_ivr_response(entity_id: str, request: Request) -> Response:
 
     try:
         if kind == "mandate_offer":
+            debit_date = _real_future_debit_date()
             result = razorpay_client.create_mandate_via_subscription(
-                invoice.amount_inr, description, customer, invoice.due.isoformat(),
+                invoice.amount_inr, description, customer, debit_date,
             )
             short_url = result["subscription"].get("short_url")
             audit_detail = {
                 "kind": kind, "amount_inr": invoice.amount_inr, "customer": customer,
-                "debit_date": invoice.due.isoformat(), "plan_id": result["plan"].get("id"),
+                "debit_date": debit_date, "plan_id": result["plan"].get("id"),
                 "subscription_id": result["subscription"].get("id"), "short_url": short_url,
                 "razorpay_mode": "test", "contact_source": resolved["source"],
             }
@@ -1085,7 +1102,12 @@ def create_mandate_now(entity_id: str, body: CreateMandateNowIn | None = None) -
 
     The amount and description are copied verbatim from `runner.invoices`
     (never invented, never taken from the request body — CLAUDE.md law 2).
-    `debit_date` defaults to the invoice's real due date when omitted. Any
+    `debit_date` defaults to 7 real calendar days from today when omitted —
+    NOT the invoice's own `due` date, which is always in the past relative to
+    real wall-clock time (every invoice in this dataset is deliberately
+    overdue) and gets rejected outright by Razorpay's real API ("start_at
+    cannot be lesser than the current time.", hit live via the IVR call path
+    — see tracking/BUILD_LOG.md 2026-08-27, `_real_future_debit_date`). Any
     omitted customer field falls back to the same synthetic demo contact used
     everywhere else in this codebase.
 
@@ -1111,7 +1133,7 @@ def create_mandate_now(entity_id: str, body: CreateMandateNowIn | None = None) -
         "contact": body.customer_contact or resolved["contact"],
         "email": body.customer_email or resolved["email"],
     }
-    debit_date = body.debit_date or invoice.due.isoformat()
+    debit_date = body.debit_date or _real_future_debit_date()
     try:
         dt.datetime.strptime(debit_date, "%Y-%m-%d")
     except ValueError as exc:

@@ -252,6 +252,34 @@ def test_ivr_response_digit_1_creates_a_real_mandate_via_the_direct_unconditiona
     assert entries[0].detail["short_url"] == "https://rzp.io/rzp/TEST"
 
 
+def test_ivr_response_digit_1_uses_a_real_future_debit_date_not_the_overdue_invoice_due_date(client, monkeypatch):
+    """The actual live-call bug (2026-08-27, tracking/BUILD_LOG.md): the
+    first version passed `invoice.due.isoformat()` as the mandate's
+    `start_at` — every invoice in this dataset is deliberately overdue, so
+    that date is always in the past relative to real wall-clock time, and
+    Razorpay's real API rejects it outright ("start_at cannot be lesser than
+    the current time."). The call itself worked; the mandate behind it
+    never did. This pins the fix: the debit date handed to Razorpay must be
+    a real future date, never the invoice's own `due` field."""
+    from api.main import runner as live_runner
+
+    invoice = live_runner.invoices["INV-001"]
+    calls = []
+    monkeypatch.setattr(
+        razorpay_client, "create_mandate_via_subscription",
+        lambda amount_inr, description, customer, debit_date: calls.append(debit_date) or {
+            "plan": {"id": "plan_TEST"},
+            "subscription": {"id": "sub_TEST", "short_url": "https://rzp.io/rzp/TEST"},
+        },
+    )
+    r = client.post("/telephony/ivr-response", params={"entity_id": "INV-001"}, data={"Digits": "1"})
+    assert r.status_code == 200
+    assert len(calls) == 1
+    debit_date = calls[0]
+    assert debit_date != invoice.due.isoformat(), "must never reuse the (always-overdue) invoice due date as a real start_at"
+    assert dt.date.fromisoformat(debit_date) > dt.date.today(), "a real Razorpay start_at must be in the future"
+
+
 def test_ivr_response_digit_2_creates_a_real_payment_link(client, monkeypatch):
     calls = []
     monkeypatch.setattr(

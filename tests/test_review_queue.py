@@ -360,9 +360,28 @@ def test_a_paused_thread_sends_nothing_even_when_the_ladder_asks(client):
     }).json()["kind"] == "message"
 
 
-def test_a_paused_thread_is_skipped_by_the_advance_loop(client):
+def test_a_paused_thread_is_skipped_by_the_advance_loop(client, monkeypatch):
     """The dashboard's one-click kill-switch, exercised through the same button
-    the demo presses. Paused before day 0, so no touch beat ever reaches it."""
+    the demo presses. Paused before day 0, so no touch beat ever reaches it.
+
+    gTTS is stubbed (not disabled — the live app's own `WorldRunner()`
+    intentionally defaults `real_tts=True`, and this test drives that real
+    app instance through the API, not a test-controlled one). Without the
+    stub: pausing INV-001 shifts the shared RNG stream for every other
+    entity (the paused one never draws), and on this seed that walks the run
+    into producing a real `voice` action — a real network call to Google's
+    gTTS endpoint that, on a machine where the IPv6 route to Google
+    black-holes, blocks for ~20s waiting out that timeout before falling
+    back to IPv4. Found live 2026-08-28 — see tracking/BUILD_LOG.md."""
+    class _FakeTTS:
+        def __init__(self, text: str, lang: str) -> None:
+            pass
+
+        def save(self, path: str) -> None:
+            with open(path, "wb") as fh:
+                fh.write(b"\xff\xf3\x84\xc4" + b"\x00" * 512)
+
+    monkeypatch.setattr("gtts.gTTS", _FakeTTS)
     client.post("/entities/INV-001/pause")
     client.post("/advance", json={"days": 45})
 

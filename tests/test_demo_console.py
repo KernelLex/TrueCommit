@@ -15,6 +15,8 @@ summary — and never anything resembling an autonomous-agent action kind, and
 a 500 traceback.
 """
 
+import datetime as dt
+
 from fastapi.testclient import TestClient
 
 import api.main as api_main
@@ -58,8 +60,15 @@ def test_omitted_customer_fields_fall_back_to_the_synthetic_demo_pattern(monkeyp
         assert captured["customer"]["email"] == DEMO_CUSTOMER_EMAIL
         assert captured["customer"]["name"]  # debtor name or entity_id fallback, never blank
 
-        # debit_date defaults to the invoice's real due date
-        assert captured["debit_date"] == invoice.due.isoformat()
+        # debit_date defaults to a real future date, NOT the invoice's own
+        # `due` date — every invoice in this dataset is deliberately overdue
+        # (due in the past relative to real wall-clock time), and a REAL
+        # Razorpay `start_at` in the past is rejected outright ("start_at
+        # cannot be lesser than the current time.", hit live via the IVR
+        # call path — tracking/BUILD_LOG.md 2026-08-27). This assertion
+        # would have caught that bug before it ever reached a real call.
+        assert captured["debit_date"] != invoice.due.isoformat()
+        assert dt.date.fromisoformat(captured["debit_date"]) > dt.date.today()
 
         # response shape: plan/subscription/customer_used, with the real short_url
         assert body["plan"]["id"] == "plan_FAKE00000000"

@@ -261,7 +261,7 @@ def test_a_genuinely_real_registration_link_is_badged_real_and_carries_the_accou
         },
     )
 
-    runner = WorldRunner(real_razorpay=True)
+    runner = WorldRunner(real_razorpay=True, real_tts=False)
     runner.advance(RUN_DAYS)
 
     real_steps = [
@@ -484,7 +484,7 @@ def test_advance_stories_cover_exactly_the_days_just_simulated():
 
 
 def test_day_indexes_line_up_with_the_runners_own_clock():
-    runner = WorldRunner(real_razorpay=False)
+    runner = WorldRunner(real_razorpay=False, real_tts=False)
     runner.advance(3)
     assert runner.day == 3
     assert day_story.day_of(runner._ts(2)) == 2
@@ -496,7 +496,7 @@ def test_day_indexes_line_up_with_the_runners_own_clock():
 def test_the_story_never_invents_a_field_it_has_no_record_for():
     """A fresh runner: no days simulated, so no trust snapshot and no beats.
     Every absent value is null with a note beside it, never a placeholder."""
-    runner = WorldRunner(real_razorpay=False)
+    runner = WorldRunner(real_razorpay=False, real_tts=False)
     story = day_story.build_day_story(runner, 0)
     assert story["entities"] == []
     assert story["simulated"] is False
