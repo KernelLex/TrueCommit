@@ -47,11 +47,20 @@ exists in this project, so every dispatched SMS record carries
 ActionKind = Literal[
     "link", "mandate_offer", "mandate_execute", "message", "voice",
     "sms", "evidence_packet", "human_handoff",
+    "mandate_pre_debit_notice", "mandate_post_debit_notice",
 ]
 """`sms` is a new outbound KIND (packet P14) and rides the same touch cap as
 every other outbound kind. Calls stay under `voice`: P14 upgraded what a
 `voice` action PRODUCES (a real gTTS-generated MP3 instead of a text line on a
-"voice_note" rail), it did not rename or split the kind."""
+"voice_note" rail), it did not rename or split the kind.
+
+`mandate_pre_debit_notice` / `mandate_post_debit_notice` (added for the RBI
+E-Mandate Framework's T-1 pre-debit and post-transaction notification
+requirements) are DELIBERATELY NOT in `state_machine.OUTBOUND_KINDS` /
+`ledger.TOUCH_COUNTED_KINDS` — they are mandatory disclosures about money
+already committed or already moved, not discretionary outreach, so a
+merchant's MAX_TOUCHES_PER_WEEK budget cannot lawfully suppress them. See
+`Ledger.pre_debit_notice` / `Ledger.post_debit_notice`."""
 AuditLayer = Literal["perception", "judgment", "action", "sentinel", "auditor"]
 
 

@@ -837,6 +837,55 @@ class Ledger:
         )
         return {"action": action, "blocked": False, "block_reason": None}
 
+    # -- RBI E-Mandate Framework: pre-/post-debit notices (packet, 2026-08-27)
+    #
+    # These are mandatory transaction disclosures, not discretionary outreach:
+    # a T-1 warning before every mandate execution, and a confirmation after
+    # every completed one, both required regardless of how many times the
+    # debtor has already been contacted that week. `mandate_pre_debit_notice`
+    # / `mandate_post_debit_notice` are deliberately absent from
+    # `state_machine.OUTBOUND_KINDS` and `TOUCH_COUNTED_KINDS` (see
+    # engine/schemas.py's ActionKind docstring), so `_gate()`'s touch-cap,
+    # terminal-state and kill-switch checks do not apply to them and
+    # `check_bounds()` allows unconditionally by construction — still called
+    # via `_try_action`, so law 4 ("every action passes check_bounds()") holds
+    # to the letter even though nothing here can ever fail it. The amount is
+    # always the ledger's own invoice record (law 2), never a caller-supplied
+    # number.
+
+    def pre_debit_notice(self, entity_id: str, execute_on: dt.date, now: dt.datetime) -> Action | None:
+        """T-1 pre-debit notification, due the day before a confirmed mandate
+        executes. Returns None only if the entity doesn't exist (the caller
+        already checked the mandate is still pending and the entity isn't
+        terminal before scheduling this)."""
+        entity = self.entities.get(entity_id)
+        if entity is None:
+            return None
+        amount = entity.invoice_amount_inr
+        params: dict[str, Any] = {"amount_inr": amount, "execute_on": execute_on.isoformat()}
+        return self._try_action(
+            entity, "mandate_pre_debit_notice", params,
+            f"RBI E-Mandate Framework: pre-debit (T-1) notice, Rs.{amount:,} debits on {execute_on.isoformat()}",
+            now,
+        )
+
+    def post_debit_notice(self, entity_id: str, execute_action_id: str, now: dt.datetime) -> Action | None:
+        """Post-transaction confirmation, due immediately after a mandate
+        executes successfully. `execute_action_id` (the `mandate_execute`
+        Action's own id) doubles as the transaction reference the notice
+        quotes — it is already a real, ledger-issued, unique id, so no new
+        reference scheme is invented for it."""
+        entity = self.entities.get(entity_id)
+        if entity is None:
+            return None
+        amount = entity.invoice_amount_inr
+        params: dict[str, Any] = {"amount_inr": amount, "txn_ref": execute_action_id}
+        return self._try_action(
+            entity, "mandate_post_debit_notice", params,
+            f"RBI E-Mandate Framework: post-debit confirmation, Rs.{amount:,} debited, ref {execute_action_id}",
+            now,
+        )
+
     def resolve_handoff(self, entity_id: str, resolution: str, now: dt.datetime) -> EntityState:
         """Close an open handoff/dispute. The ONLY producer of
         `human_resolution`, the one event allowed to move a terminal state —

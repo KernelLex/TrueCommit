@@ -244,6 +244,33 @@ SMS_TEXT = "Reminder: Rs.{amount:,} against {entity_id} is still outstanding. Pl
 it is a real message a human can read. Deliberately plain ASCII and short: an
 SMS is a 160-character rail, not a place for the Hinglish voice copy."""
 
+RBI_EMANDATE_FRAMEWORK_NOTE = "RBI E-Mandate Framework 2026: mandatory transaction notice, not discretionary outreach"
+
+TOUCH_CAP_EXEMPT_KINDS = {"mandate_pre_debit_notice", "mandate_post_debit_notice"}
+"""Mirrors the exclusion from `state_machine.OUTBOUND_KINDS` /
+`ledger.TOUCH_COUNTED_KINDS` on the message-queue side: these two kinds ride
+the queue (so the dashboard can show them) but a rolling per-debtor/per-
+entity touch window should not count them, because bound #4 was never meant
+to gate a mandatory transaction disclosure. Used by `_stamps_by`."""
+
+PRE_DEBIT_NOTICE_TEXT = (
+    "Auto-debit notice: Rs.{amount:,} against {entity_id} will be debited via your registered "
+    "mandate on {execute_date}. Cancel anytime before then at no cost. Questions or disputes: "
+    "reply here or contact support."
+)
+"""T-1 pre-debit warning (master doc's own worked example names it: 'pre-debit
+check -> T-1 reminder already sent'). States amount, date and 'cancel
+anytime' in plain words, per master doc's mandate-copy rule."""
+
+POST_DEBIT_NOTICE_TEXT = (
+    "Payment confirmation: Rs.{amount:,} against {entity_id} was debited today via your "
+    "registered mandate (ref {txn_ref}). To dispute this transaction or raise a grievance, "
+    "reply here or contact support within 30 days."
+)
+"""Post-transaction confirmation, required after every collection under the
+RBI E-Mandate Framework: transaction amount, a reference, and a grievance-
+redressal path, all in the one line the debtor actually reads."""
+
 # The one sentence that must appear on every dispatched reminder record, and the
 # reason it must (packet P14). The AUDIO and the TEXT are real; the DELIVERY is
 # not, because this project holds no telephony/SMS-gateway credential of any
@@ -510,6 +537,8 @@ class WorldRunner:
                 self._resolve_promise(day, entity_id, data)
             elif kind == "mandate_execute":
                 self._resolve_mandate_execution(day, entity_id)
+            elif kind == "mandate_pre_debit_notice":
+                self._resolve_pre_debit_notice(day, entity_id, data)
             elif kind == "link_timeout":
                 self._resolve_link_timeout(day, entity_id, data)
 
@@ -671,7 +700,10 @@ class WorldRunner:
             self._emit("mandate_confirmed", entity_id, {"amount_inr": action.params.get("amount_inr")}, day)
             self._pending_promise.pop(entity_id, None)  # the instrument supersedes the promise
             self._mandate_pending.add(entity_id)
-            self._schedule_at(day + MANDATE_EXECUTE_OFFSET, "mandate_execute", entity_id, {})
+            execute_day = day + MANDATE_EXECUTE_OFFSET
+            self._schedule_at(max(day, execute_day - 1), "mandate_pre_debit_notice",
+                              entity_id, {"execute_day": execute_day})
+            self._schedule_at(execute_day, "mandate_execute", entity_id, {})
             return
 
         # refuse_but_promise: no auto-debit, but a fresh manual commitment.
@@ -708,13 +740,63 @@ class WorldRunner:
             "mandate_execute_success" if ok else "mandate_execute_failed",
             entity_id, {"amount_inr": amount}, day,
         )
+        # `_emit` always appends the Event before deciding whether a further
+        # Action is needed — a successful execution usually needs none (the
+        # entity lands straight on the terminal state KEPT), so `action` is
+        # routinely None here even though the debit genuinely happened. The
+        # EVENT itself, not the (often absent) Action, is what the
+        # post-debit notice quotes as its transaction reference.
+        event_ref = self.events[-1].event_id
         if ok:
             self._mandate_pending.discard(entity_id)
+            self._send_post_debit_notice(entity_id, event_ref, day)
             return
         if action is not None and action.kind == "mandate_execute":
             self._schedule_at(day + 1, "mandate_execute", entity_id, {})  # the one allowed retry
         else:
             self._mandate_pending.discard(entity_id)
+
+    def _resolve_pre_debit_notice(self, day: int, entity_id: str, data: dict) -> None:
+        """RBI E-Mandate Framework: the T-1 warning, due the day before a
+        confirmed mandate executes. Fires unconditionally against the touch
+        cap (see Ledger.pre_debit_notice) but still skips an entity the
+        execution itself would skip — a dispute, pause, or terminal state
+        reached between confirmation and T-1 means there is no debit left to
+        warn about."""
+        if entity_id not in self._mandate_pending:
+            return  # execution was superseded; nothing left to notify about
+        entity = self.ledger.entities.get(entity_id)
+        if entity is None or entity.state in TERMINAL_STATES:
+            return
+        execute_day = data.get("execute_day", day + 1)
+        execute_date = self._ts(execute_day).date()
+        notice = self.ledger.pre_debit_notice(entity_id, execute_date, self._ts(day))
+        if notice is None:
+            return
+        self.actions.append(notice)
+        text = PRE_DEBIT_NOTICE_TEXT.format(
+            amount=notice.params["amount_inr"], entity_id=entity_id,
+            execute_date=execute_date.isoformat(),
+        )
+        self._send(notice, text, day, extra={"notice_type": "pre_debit",
+                                              "compliance": RBI_EMANDATE_FRAMEWORK_NOTE})
+
+    def _send_post_debit_notice(self, entity_id: str, txn_ref: str, day: int) -> None:
+        """RBI E-Mandate Framework: the post-transaction confirmation, due
+        immediately after a mandate executes successfully. Always fires when
+        the debit itself genuinely happened — real money moved, so the
+        receipt is not optional. `txn_ref` is the id of the real Event that
+        recorded the successful execution (see `_resolve_mandate_execution`
+        for why that, not the Action, is the reference that is always there)."""
+        notice = self.ledger.post_debit_notice(entity_id, txn_ref, self._ts(day))
+        if notice is None:
+            return
+        self.actions.append(notice)
+        text = POST_DEBIT_NOTICE_TEXT.format(
+            amount=notice.params["amount_inr"], entity_id=entity_id, txn_ref=txn_ref,
+        )
+        self._send(notice, text, day, extra={"notice_type": "post_debit",
+                                              "compliance": RBI_EMANDATE_FRAMEWORK_NOTE})
 
     def _resolve_link_timeout(self, day: int, entity_id: str, data: dict) -> None:
         action_id = data["action_id"]
@@ -1561,8 +1643,15 @@ class WorldRunner:
         return cart.customer_id if cart is not None else message.entity_id
 
     def _stamps_by(self, key: Callable[[Message], str]) -> dict[str, list[dt.datetime]]:
+        # RBI pre-/post-debit notices ride the message queue for dashboard
+        # visibility but are deliberately outside the touch cap this window
+        # measures (see engine/schemas.py's ActionKind docstring) — excluded
+        # here by the same reasoning that keeps them out of OUTBOUND_KINDS.
+        kind_by_action = {a.id: a.kind for a in self.actions}
         grouped: dict[str, list[dt.datetime]] = {}
         for message in self.messenger.queue:
+            if kind_by_action.get(message.action_id) in TOUCH_CAP_EXEMPT_KINDS:
+                continue
             grouped.setdefault(key(message), []).append(message.ts)
         return grouped
 

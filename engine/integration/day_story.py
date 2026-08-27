@@ -481,6 +481,13 @@ def _guardrail_summary(record: GateRecord | None, entry: AuditEntry) -> dict | N
     """
     if record is None:
         return None
+    if not record.checks:
+        # A gate record with no checks means no bound applied to this kind at
+        # all (the RBI pre-/post-debit notices: mandatory, not discretionary,
+        # so `check_bounds_detailed()` has nothing to evaluate for them) —
+        # not a checklist that happened to pass everything. An empty
+        # "Guardrails checked" panel would misleadingly imply checks ran.
+        return None
     detail = entry.detail if isinstance(entry.detail, dict) else {}
     return {
         "status": "allowed" if record.allowed else "blocked",

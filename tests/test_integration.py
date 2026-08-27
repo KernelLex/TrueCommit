@@ -17,7 +17,12 @@ from fastapi.testclient import TestClient
 
 from api.main import app
 from engine.action import razorpay_client
-from engine.integration.runner import FINAL_SWEEP_DAY, LINK_TIMEOUT_DAYS, WorldRunner
+from engine.integration.runner import (
+    FINAL_SWEEP_DAY,
+    LINK_TIMEOUT_DAYS,
+    TOUCH_CAP_EXEMPT_KINDS,
+    WorldRunner,
+)
 from engine.judgment.state_machine import (
     MAX_TOUCHES_PER_WEEK,
     TERMINAL_STATES,
@@ -69,6 +74,16 @@ def test_the_45_day_distribution_is_the_number_the_docs_quote(world: WorldRunner
     2026-08-26 (P11) for why fixing 9 false refusals recovered ₹0 more.
     If this test fails, the number in BUILD_QUALITY.md / TRACK_BAR.md /
     DECISIONS.md is now a lie and has to be re-measured, not re-asserted.
+
+    `messages_sent` moved 100 -> 111 with the RBI pre-/post-debit notices
+    (2026-08-27): every confirmed mandate gets a T-1 pre-debit notice, and
+    every one that goes on to execute successfully also gets a post-debit
+    confirmation (queued against the real Event that recorded the success,
+    since a first-attempt success needs no further Action of its own — see
+    `WorldRunner._resolve_mandate_execution`). Every OTHER figure on this
+    test is unchanged, which is the point — these notices are a pure side
+    channel (see engine/schemas.py's ActionKind docstring): no state, no
+    money, no touch cap, no promise moved because they exist.
     """
     states = _invoice_states(world)
     distribution: dict[str, int] = {}
@@ -86,7 +101,7 @@ def test_the_45_day_distribution_is_the_number_the_docs_quote(world: WorldRunner
     assert round(100 * summary["recovered_inr"] / active_value, 1) == 33.4
 
     assert summary["promises"] == {"broken": 14, "kept": 18, "pending": 6}
-    assert summary["messages_sent"] == 100
+    assert summary["messages_sent"] == 111
     assert summary["held_actions_total"] == 4
     assert summary["dead_letter"] == 0
     assert world.bound_violations() == []
@@ -216,9 +231,20 @@ def test_touch_cap_is_enforced_per_debtor_not_just_per_invoice(world: WorldRunne
     fixed it (per-debtor window inside `check_bounds`), so the assertion is now
     the law itself. Recomputed from the message QUEUE, not from the ledger's
     counter, so it would still catch a gate that leaked.
+
+    Excludes the RBI pre-/post-debit notices (`TOUCH_CAP_EXEMPT_KINDS`) the
+    same way `world.debtor_touch_windows()` itself does — they ride the same
+    queue for dashboard visibility but were never touch-counted (mandatory
+    transaction disclosures, not discretionary outreach; see engine/schemas.py's
+    ActionKind docstring). Without this exclusion this test and the runner's
+    own report it compares against would disagree on kinds neither of them is
+    actually judging bound #4 against.
     """
+    kind_by_action = {a.id: a.kind for a in world.actions}
     per_debtor: dict[str, list[dt.datetime]] = {}
     for message in world.messenger.queue:
+        if kind_by_action.get(message.action_id) in TOUCH_CAP_EXEMPT_KINDS:
+            continue
         invoice = world.invoices.get(message.entity_id)
         debtor = invoice.debtor_id if invoice else message.entity_id
         per_debtor.setdefault(debtor, []).append(message.ts)
@@ -376,6 +402,47 @@ def test_a_confirmed_mandate_is_never_later_recorded_as_refused(world: WorldRunn
         a.summary for a in world.ledger.audit if a.entity_id == entity_id
     }
     assert world.ledger.entities[entity_id].state == "KEPT"
+
+
+def test_a_confirmed_mandate_gets_a_pre_debit_and_a_post_debit_notice(world: WorldRunner):
+    """RBI E-Mandate Framework 2026 (Step 6, 2026-08-27): a T-1 warning before
+    execution and a confirmation after. INV-001 (the test above) is a real,
+    deterministic instance in this seeded run — mandate confirmed day 7,
+    executes successfully on the first attempt into KEPT — so this checks the
+    real dispatched notices rather than the isolated-Ledger unit tests in
+    tests/test_debit_notices.py."""
+    entity_id = "INV-001"
+    amount = world.ledger.entities[entity_id].invoice_amount_inr
+
+    pre = [a for a in world.actions if a.entity_id == entity_id and a.kind == "mandate_pre_debit_notice"]
+    post = [a for a in world.actions if a.entity_id == entity_id and a.kind == "mandate_post_debit_notice"]
+    execute_event = next(
+        e for e in world.events if e.entity_id == entity_id and e.type == "mandate_execute_success"
+    )
+
+    assert len(pre) == 1, "exactly one T-1 warning per mandate, not one per retry"
+    assert len(post) == 1, "the debit succeeded, so exactly one confirmation is due"
+
+    assert pre[0].params["amount_inr"] == amount
+    assert post[0].params["amount_inr"] == amount
+    # the reference is the real Event that recorded the successful execution,
+    # not an invented number — a first-attempt success needs no further
+    # Action (the entity lands straight on the terminal state KEPT), so the
+    # Event, not an Action id, is the one thing always there to quote.
+    assert post[0].params["txn_ref"] == execute_event.event_id
+
+    # T-1 means the day before, not "sometime before"
+    assert (execute_event.ts.date() - pre[0].ts.date()).days == 1
+
+    # both are genuine dispatched messages, not audit-only bookkeeping
+    queued_action_ids = {m.action_id for m in world.messenger.queue}
+    assert pre[0].id in queued_action_ids
+    assert post[0].id in queued_action_ids
+    pre_text = next(m.text for m in world.messenger.queue if m.action_id == pre[0].id)
+    post_text = next(m.text for m in world.messenger.queue if m.action_id == post[0].id)
+    assert f"Rs.{amount:,}" in pre_text and "cancel anytime" in pre_text.lower()
+    assert f"Rs.{amount:,}" in post_text and execute_event.event_id in post_text
+    assert "dispute" in post_text.lower(), "post-debit confirmation must carry grievance-redressal wording"
 
 
 def test_any_reply_opens_every_instrument_still_inside_its_window(world: WorldRunner):
