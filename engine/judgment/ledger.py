@@ -837,6 +837,85 @@ class Ledger:
         )
         return {"action": action, "blocked": False, "block_reason": None}
 
+    # -- IVR: press 1/2 on a live call (Track A, 2026-08-27) -----------------
+    #
+    # A debtor who answers a call and presses a digit is choosing an
+    # instrument in real time — the closest thing this codebase has to a
+    # debtor acting directly on the ledger. `ivr_select` mirrors
+    # `manual_reminder`'s exact gate-then-emit shape rather than routing
+    # through `process_event`/`_decide_action`: like a manual reminder, this
+    # is a HUMAN-triggered contact event, not the agent's own ladder decision,
+    # and it deliberately moves no state — the real Razorpay object this
+    # selection leads to is created directly by the caller (api/main.py),
+    # unconditionally, the same "one-off, for a human to inspect" precedent
+    # packet P13's Demo Console established for `create_mandate_now`, not
+    # routed through the rate-limited autonomous `_payment_instrument()` path
+    # a 45-day simulated run uses. See tracking/DECISIONS.md.
+
+    IVR_KINDS = ("mandate_offer", "link")
+
+    def ivr_available_options(self, entity_id: str, now: dt.datetime) -> dict[str, bool]:
+        """Read-only preview of which options are currently allowed — calls
+        `check_bounds()` directly, never `_gate()`: no touch spent, no Action
+        created, no audit entry written, just like `check_bounds_detailed`'s
+        own "provably writes nothing" preview. This is for deciding what the
+        call MENU announces; the real gate re-runs, for real, the instant the
+        debtor actually presses a digit (`ivr_select` below)."""
+        entity = self.entities.get(entity_id)
+        if entity is None:
+            return {kind: False for kind in self.IVR_KINDS}
+        amount = entity.invoice_amount_inr
+        debtor_touches = self._debtor_touches(entity_id)
+        return {
+            kind: state_machine.check_bounds(
+                entity, kind, {"amount_inr": amount}, now, debtor_touches
+            ).allowed
+            for kind in self.IVR_KINDS
+        }
+
+    def ivr_select(self, entity_id: str, kind: Literal["mandate_offer", "link"], now: dt.datetime) -> dict:
+        """The debtor's actual keypress. Returns `{"action", "blocked",
+        "block_reason"}` — the same shape `manual_reminder`/`approve_held`
+        already use, so callers reuse one refusal shape everywhere.
+
+        `check_bounds()` runs HERE, at keypress time, against the debtor's
+        real touch/renegotiation/mandate-cap state as of right now — not
+        against whatever `ivr_available_options` announced when the call
+        connected, which could be stale by the time a human finishes
+        listening to the menu and pressing a digit. A mandate cannot be
+        re-offered after a refusal, a renegotiation cap cannot be dodged by
+        picking up the phone instead of replying to a message, and the
+        weekly touch budget is the same one every other channel spends from.
+        """
+        if kind not in self.IVR_KINDS:
+            raise ReviewQueueError(f"kind must be one of {list(self.IVR_KINDS)}", 422)
+        entity = self.entities.get(entity_id)
+        if entity is None:
+            raise ReviewQueueError(f"unknown entity {entity_id}", 404)
+
+        params: dict[str, Any] = {"amount_inr": entity.invoice_amount_inr, "manual": True, "channel": "ivr"}
+        self._audit(
+            entity_id, "judgment", f"debtor selected {kind!r} via IVR keypress",
+            {"kind": kind, "params": dict(params),
+             "note": "check_bounds runs at keypress time, exactly as it does for a manual "
+                     "reminder click — this does not bypass any bound",
+             "debtor_id": self._debtor_id(entity_id)}, now,
+        )
+
+        gate = self._gate(entity, kind, params, now)
+        if not gate.allowed:
+            self._audit(
+                entity_id, "sentinel", f"IVR selection {kind!r} blocked at keypress time",
+                {"kind": kind, "reason": gate.reason}, now,
+            )
+            return {"action": None, "blocked": True, "block_reason": gate.reason}
+
+        self._record_touch(entity, now)
+        action = self._emit_action(
+            entity, kind, params, f"debtor selected {kind!r} on a live IVR call", now,
+        )
+        return {"action": action, "blocked": False, "block_reason": None}
+
     # -- RBI E-Mandate Framework: pre-/post-debit notices (packet, 2026-08-27)
     #
     # These are mandatory transaction disclosures, not discretionary outreach:

@@ -129,6 +129,23 @@ def _escape_xml(text: str) -> str:
     )
 
 
+def public_base_url() -> str:
+    """The URL Twilio can reach this app at, required for any TwiML-driven
+    call (trial accounts reject inline `twiml=`, see `place_call` below).
+    Raises `TelephonyError` when unset rather than let a caller build a
+    broken webhook URL and find out only when Twilio's fetch fails."""
+    load_dotenv()
+    base_url = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
+    if not base_url:
+        raise TelephonyError(
+            "PUBLIC_BASE_URL not set - Twilio trial accounts require a URL it can "
+            "fetch TwiML from (inline twiml= is rejected on trial), so this app must "
+            "be reachable from the internet (deployed, or tunnelled) before a real call "
+            "can speak custom text. Add PUBLIC_BASE_URL to .env once you have one."
+        )
+    return base_url
+
+
 def place_call(to_number: str, text: str) -> dict[str, Any]:
     """Place a REAL outbound phone call. Twilio's own text-to-speech reads
     `text` aloud via TwiML `<Say>` — this module generates no audio of its
@@ -159,17 +176,41 @@ def place_call(to_number: str, text: str) -> dict[str, Any]:
     # in `.env` once this app is deployed or tunnelled; until then, calling
     # this function raises rather than silently trying the inline path that
     # is now known to fail on trial accounts.
-    base_url = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
-    if not base_url:
-        raise TelephonyError(
-            "PUBLIC_BASE_URL not set - Twilio trial accounts require a URL it can "
-            "fetch TwiML from (inline twiml= is rejected on trial), so this app must "
-            "be reachable from the internet (deployed, or tunnelled) before a real call "
-            "can speak custom text. Add PUBLIC_BASE_URL to .env once you have one."
-        )
+    base_url = public_base_url()
 
     to = _e164(to_number)
     twiml_url = f"{base_url}/telephony/twiml?text={quote(text)}"
+    try:
+        call = _client().calls.create(url=twiml_url, to=to, from_=from_number)
+    except TwilioRestException as exc:
+        raise TelephonyError(str(exc), status_code=getattr(exc, "status", None)) from exc
+    return {"sid": call.sid, "status": call.status, "to": to, "from": from_number, "twiml_url": twiml_url}
+
+
+def place_ivr_call(to_number: str, entity_id: str) -> dict[str, Any]:
+    """Place a REAL outbound call that offers the debtor a live choice —
+    press 1 for a mandate, press 2 for a payment link — instead of just
+    reading a reminder aloud. Twilio fetches the opening menu from this
+    project's own `/telephony/ivr-menu?entity_id=...` webhook (built fresh at
+    call time from `Ledger.ivr_available_options`, so the menu never offers
+    an instrument the bounds would refuse), and the digit the debtor presses
+    is handled by `/telephony/ivr-response` — this function's only job is to
+    dial and point Twilio at that first webhook, the same shape as
+    `place_call` above with a menu URL instead of a fixed `<Say>` URL.
+
+    Returns `{"sid", "status", "to", "from", "twiml_url"}` on success. Raises
+    `TelephonyError` on any failure, exactly like `place_call`.
+    """
+    from twilio.base.exceptions import TwilioRestException
+
+    load_dotenv()
+    from_number = os.environ.get("TWILIO_PHONE_NUMBER", "")
+    if not from_number:
+        raise TelephonyError("TWILIO_PHONE_NUMBER not set - add it to .env")
+
+    base_url = public_base_url()
+    to = _e164(to_number)
+    twiml_url = f"{base_url}/telephony/ivr-menu?entity_id={quote(entity_id)}"
     try:
         call = _client().calls.create(url=twiml_url, to=to, from_=from_number)
     except TwilioRestException as exc:

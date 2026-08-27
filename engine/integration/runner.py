@@ -1501,6 +1501,23 @@ class WorldRunner:
             return False
         return self.resolve_contact(entity_id)["source"] == "operator_submitted"
 
+    def real_telephony_contact(self, entity_id: str) -> str | None:
+        """The same three non-"is this manual" conditions from
+        `_should_go_real_telephony` above (opt-in, credential present, a real
+        operator-submitted contact — never the synthetic demo number),
+        reusable by a route that is BY CONSTRUCTION always a manual click and
+        so has no Action to read `params["manual"]` off of (the IVR call
+        trigger, `api/main.py`'s `POST /entities/{id}/call-ivr-now`). Returns
+        the real E.164-ish contact string when all three hold, else `None`."""
+        if not self.real_telephony:
+            return None
+        if not telephony.is_configured():
+            return None
+        resolved = self.resolve_contact(entity_id)
+        if resolved["source"] != "operator_submitted":
+            return None
+        return resolved["contact"]
+
     def _should_go_real_telegram(self, action: Action, entity_id: str) -> bool:
         """The Telegram equivalent of `_should_go_real_telephony` (packet
         P17). Same manual-only + explicit-opt-in + credential-present shape,

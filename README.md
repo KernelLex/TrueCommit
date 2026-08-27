@@ -22,7 +22,7 @@ powershell -ExecutionPolicy Bypass -File run.ps1
 
 `setup` creates a Python venv, installs dependencies, and installs the dashboard's `node_modules`. `run` starts the API and the dashboard together. The app runs fully offline with no API keys — copy `.env.example` to `.env` and add real keys only for the live-Razorpay / real-channel demos.
 
-Run the test suite (577 tests as of this writing, fully offline):
+Run the test suite (606 tests as of this writing, fully offline):
 ```
 .venv/Scripts/python.exe -m pytest tests/   # Windows
 .venv/bin/python -m pytest tests/           # Mac/Linux

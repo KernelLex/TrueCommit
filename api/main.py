@@ -16,8 +16,9 @@ import datetime as dt
 import json
 from contextlib import asynccontextmanager
 from typing import Literal
+from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -728,6 +729,200 @@ def telephony_twiml(text: str) -> Response:
     # unparseable in live testing (2026-08-27, tracking/BUILD_LOG.md), and
     # every official Twilio TwiML example uses this exact value.
     return Response(content=twiml, media_type="text/xml")
+
+
+# ---------------------------------------------------------------------------
+# IVR: press 1/2 on a live call (Track A, 2026-08-27)
+#
+# Two Twilio-facing webhooks (public, read/decide-on-the-fly, stateless
+# beyond the ledger's own audit trail) plus one operator-facing trigger.
+# `/telephony/ivr-menu` is where `place_ivr_call` points Twilio at when the
+# call connects; `/telephony/ivr-response` is where Twilio's `<Gather>` POSTs
+# the pressed digit. Both always return valid TwiML, never an HTTP error —
+# Twilio has no good way to surface a 4xx/5xx to the person on the phone, so
+# an unknown entity or a blocked selection is spoken aloud honestly instead.
+#
+# The real Razorpay object is created HERE, directly and unconditionally —
+# not through `runner.dispatch_action()`'s `_payment_instrument()`, which is
+# the rate-limited, mostly-simulated path a 45-day automated run uses. This
+# mirrors packet P13's `create-mandate-now` precedent exactly: a human (here,
+# the debtor's own keypress) triggering a one-off real object is not the
+# runaway-cost risk `check_bounds()`'s bounds exist to prevent — the bound
+# that DOES apply (whether this debtor may be offered a mandate/link at all
+# right now) is enforced first, by `Ledger.ivr_select()`, before any network
+# call is attempted.
+# ---------------------------------------------------------------------------
+
+_IVR_DIGIT_TO_KIND: dict[str, Literal["mandate_offer", "link"]] = {"1": "mandate_offer", "2": "link"}
+
+_IVR_MENU_PROMPT = {
+    "mandate_offer": "Press 1 to set up an automatic payment on a date you choose.",
+    "link": "Press 2 to get a payment link on your phone instead.",
+}
+
+
+def _ivr_say(text: str) -> str:
+    return f'<Say voice="Polly.Aditi" language="hi-IN">{telephony._escape_xml(text)}</Say>'
+
+
+def _ivr_hangup_response(text: str) -> Response:
+    twiml = f'<?xml version="1.0" encoding="UTF-8"?><Response>{_ivr_say(text)}<Hangup/></Response>'
+    return Response(content=twiml, media_type="text/xml")
+
+
+@app.api_route("/telephony/ivr-menu", methods=["GET", "POST"])
+def telephony_ivr_menu(entity_id: str) -> Response:
+    """The opening menu Twilio fetches the moment an IVR call connects.
+    Built fresh from `Ledger.ivr_available_options` every time — the menu
+    never announces an instrument the bounds would refuse a moment later,
+    though the real gate re-runs anyway at keypress time (see
+    `/telephony/ivr-response`) because eight seconds of `<Gather>` timeout is
+    still enough for the world to move on."""
+    invoice = runner.invoices.get(entity_id)
+    entity = runner.ledger.entities.get(entity_id)
+    if invoice is None or entity is None:
+        return _ivr_hangup_response("Sorry, we could not find your account. Goodbye.")
+
+    options = ledger.ivr_available_options(entity_id, runner.now())
+    offered = [kind for kind in ("mandate_offer", "link") if options.get(kind)]
+    intro = f"Hi, this is Promise Keeper calling about Rs.{entity.invoice_amount_inr:,} that is overdue."
+
+    if not offered:
+        return _ivr_hangup_response(
+            f"{intro} We are unable to offer a new payment option on this account right now. "
+            "Please check your messages for updates. Goodbye."
+        )
+
+    try:
+        base_url = telephony.public_base_url()
+    except telephony.TelephonyError:
+        # Can only happen if PUBLIC_BASE_URL was unset after the call was
+        # already placed (place_ivr_call itself requires it first) — still
+        # handled here rather than letting a Twilio-facing webhook 500.
+        return _ivr_hangup_response("Sorry, this call cannot be completed right now. Goodbye.")
+    action_url = f"{base_url}/telephony/ivr-response?entity_id={quote(entity_id)}"
+    menu_text = intro + " " + " ".join(_IVR_MENU_PROMPT[kind] for kind in offered)
+    twiml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f'<Response><Gather numDigits="1" action="{action_url}" method="POST" timeout="8">'
+        f'{_ivr_say(menu_text)}'
+        f'</Gather>{_ivr_say("We did not receive a response. Goodbye.")}</Response>'
+    )
+    return Response(content=twiml, media_type="text/xml")
+
+
+@app.post("/telephony/ivr-response")
+async def telephony_ivr_response(entity_id: str, request: Request) -> Response:
+    """Where Twilio's `<Gather>` POSTs the digit the debtor pressed
+    (`Digits`, form-encoded — Twilio's webhook convention). Re-runs
+    `check_bounds()` for real via `Ledger.ivr_select()` before doing
+    anything else: the menu the debtor just heard could be stale."""
+    form = await request.form()
+    digits = str(form.get("Digits", ""))
+    kind = _IVR_DIGIT_TO_KIND.get(digits)
+    if kind is None:
+        return _ivr_hangup_response("Sorry, that was not a valid option. Goodbye.")
+
+    invoice = runner.invoices.get(entity_id)
+    if invoice is None or entity_id not in runner.ledger.entities:
+        # A webhook Twilio is mid-call on must always get back valid TwiML,
+        # never an HTTP error — so this checks everything `ivr_select` would
+        # 404/422 on itself before calling it, rather than catching
+        # `ReviewQueueError` and trying to translate it into speech.
+        return _ivr_hangup_response("Sorry, we could not find your account. Goodbye.")
+
+    outcome = ledger.ivr_select(entity_id, kind, runner.now())
+
+    if outcome["blocked"]:
+        return _ivr_hangup_response(
+            "Sorry, that option is not available on this account right now. "
+            "We will follow up by message. Goodbye."
+        )
+    runner.actions.append(outcome["action"])  # bounds-checked, audited, touch-counted — see Ledger.ivr_select
+
+    resolved = runner.resolve_contact(entity_id)
+    customer = {"name": resolved["name"], "contact": resolved["contact"], "email": resolved["email"]}
+    description = f"Promise Keeper IVR selection for {entity_id}"
+
+    try:
+        if kind == "mandate_offer":
+            result = razorpay_client.create_mandate_via_subscription(
+                invoice.amount_inr, description, customer, invoice.due.isoformat(),
+            )
+            short_url = result["subscription"].get("short_url")
+            audit_detail = {
+                "kind": kind, "amount_inr": invoice.amount_inr, "customer": customer,
+                "debit_date": invoice.due.isoformat(), "plan_id": result["plan"].get("id"),
+                "subscription_id": result["subscription"].get("id"), "short_url": short_url,
+                "razorpay_mode": "test", "contact_source": resolved["source"],
+            }
+            confirm_text = "Your automatic payment has been set up. Check your messages for the confirmation link."
+        else:
+            result = razorpay_client.create_payment_link(invoice.amount_inr, description, customer)
+            short_url = result.get("short_url")
+            audit_detail = {
+                "kind": kind, "amount_inr": invoice.amount_inr, "customer": customer,
+                "payment_link_id": result.get("id"), "short_url": short_url,
+                "razorpay_mode": "test", "contact_source": resolved["source"],
+            }
+            confirm_text = "A payment link has been sent to your messages."
+    except RazorpayError as exc:
+        runner.audit_manual(
+            entity_id, f"IVR: {kind} creation FAILED (debtor selected on a live call)",
+            {"kind": kind, "amount_inr": invoice.amount_inr, "customer": customer,
+             "error": str(exc), "razorpay_status_code": exc.status_code, "razorpay_description": exc.description},
+        )
+        return _ivr_hangup_response(
+            "Sorry, something went wrong setting that up. We will follow up by message. Goodbye."
+        )
+
+    runner.audit_manual(entity_id, f"IVR: {kind} created (debtor selected on a live call)", audit_detail)
+    return _ivr_hangup_response(confirm_text)
+
+
+class CallIvrNowIn(BaseModel):
+    contact_override: str | None = None
+
+
+@app.post("/entities/{entity_id}/call-ivr-now")
+def call_ivr_now(entity_id: str, body: CallIvrNowIn | None = None) -> dict:
+    """The operator-facing trigger: place a REAL phone call that offers the
+    debtor a live choice, gated exactly like every other real-dispatch path
+    in this codebase (`WorldRunner.real_telephony_contact`) — opt-in via
+    `PK_REAL_TELEPHONY=1`, a real Twilio credential, and a real
+    operator-submitted contact (never the synthetic demo number). A request
+    that fails any of those gates is refused with a clear reason and no call
+    is placed — this route never falls back to a simulated call, unlike the
+    autonomous voice reminder path, because there is nothing to simulate: an
+    IVR call is only meaningful if a real person can really press a digit."""
+    invoice = runner.invoices.get(entity_id)
+    if invoice is None:
+        raise HTTPException(status_code=404, detail="unknown entity (no invoice on record for it)")
+
+    contact = body.contact_override if body and body.contact_override else runner.real_telephony_contact(entity_id)
+    if not contact:
+        reason = (
+            "no real telephony contact available: requires PK_REAL_TELEPHONY=1, a configured "
+            "Twilio credential, and a real operator-submitted contact for this debtor "
+            "(POST /entities/{id}/contact) — or pass contact_override explicitly"
+        )
+        runner.audit_manual(entity_id, "IVR call not placed (gate refused)", {"reason": reason})
+        return {"placed": False, "reason": reason, "call": None}
+
+    try:
+        result = telephony.place_ivr_call(contact, entity_id)
+    except telephony.TelephonyError as exc:
+        runner.audit_manual(
+            entity_id, "IVR call FAILED (operator-triggered)",
+            {"contact": contact, "error": str(exc)},
+        )
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    runner.audit_manual(
+        entity_id, "IVR call placed (operator-triggered, real Twilio call)",
+        {"contact": contact, "call_sid": result["sid"], "call_status": result["status"]},
+    )
+    return {"placed": True, "reason": None, "call": result}
 
 
 @app.post("/entities/{entity_id}/remind-now")
