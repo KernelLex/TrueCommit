@@ -170,13 +170,11 @@ User checked the Razorpay TEST dashboard directly and found netbanking eMandate 
 - **This closes the "mandate execute/revoke realness" open risk entirely.** Full narrative + real IDs: `tracking/BUILD_LOG.md`. `TRACK_BAR.md` §0 and `DECISIONS.md` updated and pushed (`80adc7f`).
 
 
-## ⏸ PARKED (user decision 2026-08-26 — resume only on user signal)
-- **Mandate flow-real enablement**: this test account lacks UPI/eMandate (account-level gate, needs business KYC the user rightly won't fabricate, or an organizer-provisioned hackathon account). Everything documented (BUILD_LOG + TRACK_BAR §0 API-real vs flow-real); harness armed (`scripts/verify_mandate_lifecycle.py`); demo + submission fully intact without it. Optional upgrade path: ask buildathon organizers for an enabled test account.
-
 ## ⚠ OPEN RISKS
+*(Corrected 2026-08-27 — this section and the "PARKED" section above it directly contradicted the eMandate rail pivot section immediately above both: that section says mandate execute/revoke realness was closed entirely on 2026-08-26; these two sections still said it was blocked, needed KYC, and was an open risk. Both were pre-pivot text nobody deleted when the pivot resolved them — a real contradiction a judge reading top to bottom would have hit on the project's single most important claim. The PARKED section is removed; nothing in it needs a heading of its own any more.)*
 - Local-model nondeterminism: 7b flips one message across runs (88.6% quoted as the floor, gate cleared in all observed runs) — mitigation: quote the range, cache pins demo behavior
-- Mandate execute/revoke realness — one manual registration authorization during demo prep (path documented in the client docstring)
 - qwen2.5:3b remains below gate (70.5%) — 7b is the demo model; 3b stays as the honest comparison row
+- **UPI Autopay stays account-gated** (needs business KYC this project won't fabricate) — this is a minor, non-blocking fact, not an open risk: netbanking eMandate (the primary rail since the pivot) is fully real end to end and needs no gate. UPI Autopay is kept, unchanged, only as the alternate rail in case the gate ever lifts.
 
 ## 🎬 UI DEMO RUN (2026-08-26, live browser session against the fully-merged build)
 Dashboard served at `localhost:5173` (Vite, proxying `/api` → uvicorn on 8010 — `PK_API_PORT` env added to vite.config.js because Windows svchost squats 8000 on this machine), API started with `PK_REAL_RAZORPAY=1`. Verified live in the browser:

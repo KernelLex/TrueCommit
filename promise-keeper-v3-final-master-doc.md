@@ -18,7 +18,7 @@ Revenue recovery tools send messages. Messages ask the customer to decide again,
 |---|---|---|
 | **Scheduled mandate** | "Payday is Friday" (timing) | Approve once → auto-debit + auto-order on date |
 | **Price-triggered mandate** | "Waiting for the sale" (emo: ROADMAP ONLY — needs price-feed sim) | Approve at target price → executes if price drops, expires free otherwise |
-| **Delivery-secured mandate** | "Don't trust online payment" (trust) — THE CROWN JEWEL | Funds BLOCKED at checkout, debited only on delivery confirmation, released on return. COD's safety without COD's RTO disaster |
+| **Delivery-secured mandate** | "Don't trust online payment" (trust) — THE CROWN JEWEL | Debit scheduled at checkout, executed only on delivery confirmation, cancelled on return. COD's safety without COD's RTO disaster. *(Corrected 2026-08-27 — this project's live-verified mandate rail is netbanking eMandate, which schedules a future debit and does not lien/block funds the way UPI OTM/SBMD/Reserve Pay would; see `tracking/PROBLEM_TASTE.md`.)* |
 
 Demo scheduled + delivery-secured. Mention price-triggered as roadmap.
 
@@ -188,12 +188,13 @@ CART ABANDONED (₹2,499, dropped at PAYMENT stage, 2 failed OTP attempts)
        buyer on this store → trust path)
     ▼
 DELIVERY-SECURED MANDATE offer (crown jewel):
-    "Pay nothing today. ₹2,499 is BLOCKED in your account — we only
-     debit when delivery is confirmed. Returned? Released instantly."
+    "Pay nothing today. Rs.2,499 debit is scheduled on delivery
+     confirmation. Returned? Mandate cancelled instantly, nothing debited."
     → approve → order ships → [sim] delivery confirmed day+4 →
       mandate EXECUTED → merchant paid, zero RTO risk
-    → alt branch: customer rejects item → mandate REVOKED → funds
-      released → logged as clean loss, NOT chased (stopping rule)
+    → alt branch: customer rejects item → mandate REVOKED before
+      execution → nothing debited → logged as clean loss, NOT chased
+      (stopping rule)
 ```
 
 ## 3.4 Escalation state machine (explicit)
