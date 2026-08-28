@@ -69,6 +69,7 @@ def test_shipped_yaml_matches_every_builtin_default():
     assert cfg.sentinel.circuit_breaker_threshold == CIRCUIT_BREAKER_THRESHOLD
     assert cfg.auditor.sample_rate == 0.10
     assert cfg.auditor.quarantine_threshold == 0.85
+    assert cfg.auditor.rolling_window == 10
     assert cfg.judgment.model_dump() == {}
 
 
@@ -89,6 +90,37 @@ def test_default_yaml_sentinel_is_identical_to_bare_constructor():
     assert configured.backoff_schedule == bare.backoff_schedule
     assert configured.link_open_timeout_hours == bare.link_open_timeout_hours
     assert configured.circuit_breaker_threshold == bare.circuit_breaker_threshold
+
+
+def test_default_yaml_auditor_is_identical_to_a_bare_constructor_with_the_same_defaults():
+    """`Auditor(rng)` built with this module's own DEFAULT_* constants vs
+    one built by the loader from the untouched, shipped yaml -- must behave
+    identically (same shape of guarantee `build_sentinel()` already has)."""
+    import random
+
+    from engine.action.auditor import (
+        DEFAULT_QUARANTINE_THRESHOLD, DEFAULT_ROLLING_WINDOW, DEFAULT_SAMPLE_RATE,
+    )
+
+    bare = agent_config.Auditor(random.Random(42), sample_rate=DEFAULT_SAMPLE_RATE,
+                                 quarantine_threshold=DEFAULT_QUARANTINE_THRESHOLD,
+                                 rolling_window=DEFAULT_ROLLING_WINDOW)
+    configured = agent_config.build_auditor(random.Random(42))
+    assert configured.sample_rate == bare.sample_rate
+    assert configured.quarantine_threshold == bare.quarantine_threshold
+    assert configured.rolling_window == bare.rolling_window
+
+
+def test_auditor_honors_a_changed_quarantine_threshold_from_yaml(tmp_path):
+    """The actually-WIRED requirement: a yaml override must change real
+    Auditor behaviour, not just be reported."""
+    import random
+
+    path = write_yaml(tmp_path, {"auditor": {"quarantine_threshold": 0.99, "rolling_window": 2}})
+    cfg = agent_config.load_config(path)
+    auditor = agent_config.build_auditor(random.Random(1), cfg)
+    assert auditor.quarantine_threshold == 0.99
+    assert auditor.rolling_window == 2
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +337,9 @@ def test_get_config_route_shape_and_values():
         assert body["config"]["perception"]["provider"] == "heuristic"
         assert body["effective"]["perception"]["provider"]["value"] == "heuristic"
         assert body["effective"]["sentinel"]["max_retries"] == MAX_RETRIES
+        assert body["effective"]["auditor"] == {
+            "sample_rate": 0.10, "quarantine_threshold": 0.85, "rolling_window": 10,
+        }
 
         bound_names = {row["name"] for row in body["bounds"]["numeric"]}
         assert "MANDATE_AMOUNT_CAP" in bound_names
@@ -314,6 +349,7 @@ def test_get_config_route_shape_and_values():
             "sentinel", "perception_cache_enabled", "perception_provider_model_base_url",
             "auditor", "judgment",
         }
+        assert "wired" in body["wiring_notes"]["auditor"]
 
         live = body["live_status"]
         assert live["runtime_provider"] == "heuristic"
@@ -321,6 +357,7 @@ def test_get_config_route_shape_and_values():
         assert live["ollama_fallback_events"] >= 0
         assert live["sentinel_dead_letter_count"] >= 0
         assert set(live["cache_stats"]) == {"hits", "misses", "writes"}
+        assert live["auditor_quarantined"] is False
 
 
 def test_get_config_route_is_read_only_get_only():
@@ -328,3 +365,35 @@ def test_get_config_route_is_read_only_get_only():
 
     with TestClient(app) as c:
         assert c.post("/config", json={}).status_code == 405
+
+
+# ---------------------------------------------------------------------------
+# GET /auditor
+# ---------------------------------------------------------------------------
+
+
+def test_get_auditor_route_shape():
+    from api.main import app
+
+    with TestClient(app) as c:
+        r = c.get("/auditor")
+        assert r.status_code == 200
+        body = r.json()
+        assert set(body) == {
+            "sample_count", "rolling_agreement", "quarantined",
+            "sample_rate", "quarantine_threshold", "rolling_window", "drift_log",
+        }
+        assert body["sample_count"] == 0  # fresh app, no advance() yet
+        assert body["rolling_agreement"] is None
+        assert body["quarantined"] is False
+        assert body["drift_log"] == []
+
+
+def test_get_auditor_route_reflects_a_real_advanced_run():
+    from api.main import app
+
+    with TestClient(app) as c:
+        c.post("/advance", json={"days": 45})
+        r = c.get("/auditor")
+        body = r.json()
+        assert body["sample_count"] > 0

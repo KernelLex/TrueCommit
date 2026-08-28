@@ -109,6 +109,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from data.generate import DEBTOR_BY_ID
+from engine import config as agent_config
 from engine.action import razorpay_client
 from engine.action.contacts import ContactBook
 from engine.action.evidence import build_evidence_packet
@@ -371,6 +372,12 @@ class WorldRunner:
         self.ledger = Ledger()
         self.messenger = Messenger()
         self.sentinel = Sentinel()
+        self.auditor = agent_config.build_auditor(random.Random(seed))
+        """A DEDICATED `random.Random(seed)` — same seed value as
+        `self.rng` for reproducibility, but a SEPARATE instance so the
+        Auditor's sampling draws never interleave with (and so never shift)
+        the persona-narrative stream `self.rng` drives. See
+        `Auditor.__init__`'s docstring."""
         self.contacts = ContactBook()
         """Real operator-submitted debtor/customer contacts (packet P15),
         keyed by `_contact_key()` — a debtor_id for an invoice, the entity_id
@@ -1404,7 +1411,36 @@ class WorldRunner:
              "condition": extraction.condition, "text": text,
              "provider": self.provider_name}, day,
         )
+        self._audit_extraction(message, thread, extraction, entity_id, day)
         return extraction
+
+    def _audit_extraction(
+        self, message: Message, thread: list[Message], extraction: Extraction,
+        entity_id: str, day: int,
+    ) -> None:
+        """The Auditor's own pass (master doc §7.3), run through the same
+        funnel every extraction passes through so nothing can reach a
+        money-adjacent decision without a chance of being sampled. Writes
+        its own `perception`-layer audit entry only when it actually sampled
+        this one (the ~90% it skips leave no trail entry — a skip isn't a
+        finding), and flips `Ledger.auditor_quarantined` only on the beats
+        the rolling agreement rate actually crosses the threshold, so the
+        trail shows drift events, not one entry per sample."""
+        sample = self.auditor.maybe_audit(message, thread, extraction, entity_id, self._ts(day))
+        if sample is None:
+            return
+        self._audit(
+            entity_id, "auditor", f"audit sample: {'agrees' if sample.agrees else 'DISAGREES'}",
+            {"sample_id": sample.id, "message_id": message.id, "extraction_level": sample.extraction_level,
+             "note": sample.note, "source": sample.source,
+             "rolling_agreement": self.auditor.rolling_agreement()}, day,
+        )
+        if self.auditor.drift_log and self.auditor.drift_log[-1].sample_count == len(self.auditor.samples):
+            drift = self.auditor.drift_log[-1]
+            self.ledger.set_auditor_quarantine(
+                drift.event == "quarantined", self._ts(day),
+                {"rolling_agreement": drift.rolling_agreement, "sample_count": drift.sample_count},
+            )
 
     def _append_thread(self, entity_id: str, direction: str, channel: str, text: str, day: int) -> Message:
         n = self._msg_seq.get(entity_id, 0) + 1

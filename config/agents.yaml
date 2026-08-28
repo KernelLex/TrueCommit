@@ -31,9 +31,7 @@
 #                                     providers/** + engine/integration/**,
 #                                     both out of scope for this packet).
 #                                     Use the env vars today for that.
-#   auditor.*                     -- NOT wired. Honest placeholders only,
-#                                     until the Auditor packet (Day 7,
-#                                     master doc §7.3).
+#   auditor.*                     -- fully wired (engine.config.build_auditor())
 #   judgment                      -- has no tunables, ever. See below.
 
 perception:
@@ -66,13 +64,20 @@ sentinel:
   circuit_breaker_threshold: 5
 
 auditor:
-  # NOT WIRED until the Auditor packet (Day 7, master doc §7.3: samples
-  # 10% of extractions, verifies against the original message, tracks
-  # rolling accuracy, quarantines the extractor below quarantine_threshold).
-  # These two values are placeholders that match the master doc's own
-  # numbers — changing them today has no runtime effect anywhere.
+  # Wired via engine.config.build_auditor() (master doc §7.3: samples this
+  # fraction of extractions, verifies each against the original message,
+  # tracks a rolling agreement rate, quarantines the extractor — routing
+  # every money-adjacent action to human review regardless of that read's
+  # own confidence — below quarantine_threshold). Defaults match the master
+  # doc's own numbers.
   sample_rate: 0.10
   quarantine_threshold: 0.85
+  # How many of the most recent samples the rolling agreement rate is
+  # computed over. Deliberately small: a 45-day run samples ~10% of ~100
+  # messages, so a window in the tens is roughly the largest that can ever
+  # fill within one run. Default matches engine/action/auditor.py's
+  # DEFAULT_ROLLING_WINDOW.
+  rolling_window: 10
 
 judgment: {}
   # NO TUNABLES HERE. NONE. EVER.

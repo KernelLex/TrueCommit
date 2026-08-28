@@ -34,8 +34,11 @@ applies to code claims, not only to metrics)
   this file existed, so nothing regresses; the yaml default for these three
   fields is reported+honest but not yet load-bearing. See
   `tracking/DECISIONS.md`.
-- `auditor.*` — NOT wired. Placeholders only, honestly labelled, until the
-  Auditor packet (Day 7, master doc §7.3).
+- `auditor.*` — fully wired (2026-08-28, master doc §7.3). `build_auditor(rng)`
+  / `auditor_kwargs()` read the yaml (falling back to `engine.action.auditor`'s
+  own module constants wherever a key is absent) and produce a real, working
+  `Auditor`. `rng` must be the caller's own DEDICATED generator, never the
+  main persona-narrative one — see `Auditor.__init__`'s docstring.
 - `judgment` — has no tunables, ever (law 4). Present in the yaml purely as
   a documented, read-only mirror of the constants in `state_machine.py`;
   `bounds_snapshot()` below reads those constants directly (never
@@ -64,6 +67,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from engine.action.auditor import Auditor
 from engine.action.sentinel import (
     BACKOFF_MINUTES as _SENTINEL_BACKOFF_MINUTES,
     CIRCUIT_BREAKER_THRESHOLD as _SENTINEL_CIRCUIT_BREAKER_THRESHOLD,
@@ -150,12 +154,13 @@ class SentinelSection(BaseModel):
 
 
 class AuditorSection(BaseModel):
-    """Not wired until the Auditor packet (Day 7, master doc §7.3). Present
-    so the yaml surface for all five mesh agents exists up front; reading
-    these values today has no runtime effect anywhere."""
+    """Wired as of the Auditor packet (2026-08-28, master doc §7.3) —
+    `build_auditor()` below reads these into a real `engine.action.auditor.
+    Auditor`, the same shape `build_sentinel()` already does for Sentinel."""
 
     sample_rate: float = Field(default=0.10, ge=0.0, le=1.0)
     quarantine_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+    rolling_window: int = Field(default=10, ge=1)
 
 
 class AgentsConfig(BaseModel):
@@ -285,6 +290,30 @@ def build_sentinel(cfg: AgentsConfig | None = None) -> Sentinel:
     """The actual wiring: a real `Sentinel` built from `config/agents.yaml`
     (or the shipped, default-matching values if a key is absent)."""
     return Sentinel(**sentinel_kwargs(cfg))
+
+
+# ---------------------------------------------------------------------------
+# Auditor — wired as of the Auditor packet (2026-08-28).
+# ---------------------------------------------------------------------------
+
+
+def auditor_kwargs(cfg: AgentsConfig | None = None) -> dict[str, Any]:
+    cfg = cfg or load_config()
+    a = cfg.auditor
+    return {
+        "sample_rate": a.sample_rate,
+        "quarantine_threshold": a.quarantine_threshold,
+        "rolling_window": a.rolling_window,
+    }
+
+
+def build_auditor(rng, cfg: AgentsConfig | None = None) -> Auditor:
+    """A real `Auditor` (engine/action/auditor.py) built from
+    `config/agents.yaml`. `rng` is required and must be a DEDICATED seeded
+    generator, never the caller's own persona-narrative `random.Random` —
+    see `Auditor.__init__`'s docstring for why sharing one would silently
+    change the pinned simulation numbers."""
+    return Auditor(rng, **auditor_kwargs(cfg))
 
 
 # ---------------------------------------------------------------------------

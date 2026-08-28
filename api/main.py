@@ -1313,6 +1313,7 @@ def get_config() -> dict:
                 "cache_enabled": {"value": cache_val, "source": cache_src},
             },
             "sentinel": agent_config.sentinel_kwargs(cfg),
+            "auditor": agent_config.auditor_kwargs(cfg),
         },
         "bounds": agent_config.bounds_snapshot(),
         "wiring_notes": {
@@ -1325,7 +1326,8 @@ def get_config() -> dict:
                 "resolved + reported here only -- the live WorldRunner in this process still "
                 "selects its provider via env-var-or-default (see this route's own docstring)"
             ),
-            "auditor": "not wired until the Auditor packet (Day 7, master doc §7.3) -- placeholders only",
+            "auditor": "wired -- engine.config.build_auditor() constructs a real Auditor from these "
+                       "values; live rolling status is at GET /auditor",
             "judgment": "no tunables by design (CLAUDE.md law 4) -- bounds are hard constants in "
                         "state_machine.py, shown above for reference only",
         },
@@ -1335,5 +1337,15 @@ def get_config() -> dict:
             "ollama_fallback_events": len(get_fallback_events()),
             "sentinel_dead_letter_count": len(runner.sentinel.dead_letter),
             "cache_stats": perception_cache.stats(),
+            "auditor_quarantined": ledger.auditor_quarantined,
         },
     }
+
+
+@app.get("/auditor")
+def get_auditor_status() -> dict:
+    """Live Auditor status (master doc §7.3's "live accuracy widget") —
+    sample count, rolling agreement rate, quarantine state, and the full
+    drift log. Read-only; the Auditor samples itself as extractions happen
+    (`WorldRunner._audit_extraction`), nothing here triggers a sample."""
+    return runner.auditor.status()

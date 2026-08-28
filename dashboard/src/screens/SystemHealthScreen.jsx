@@ -13,6 +13,7 @@ function SourceTag({ source }) {
 export default function SystemHealthScreen() {
   const { data: health, error, loading } = usePolling(() => api.health(), { intervalMs: 3000 })
   const { data: config, error: configError } = usePolling(() => api.config(), { intervalMs: 5000 })
+  const { data: auditorStatus, error: auditorError } = usePolling(() => api.auditor(), { intervalMs: 5000 })
   const online = !error && health && health.status === 'ok'
 
   const live = config?.live_status
@@ -95,6 +96,66 @@ export default function SystemHealthScreen() {
       </div>
 
       <div className="panel">
+        <h2>Auditor — accuracy agent</h2>
+        <p className="panel-sub">
+          The one justified 2nd-pass use of an LLM (master doc §7.3): samples a fraction of extractions, checks
+          each against the original message, and quarantines the extractor — routing every money-adjacent action
+          to human review regardless of that read&apos;s own confidence — when its rolling agreement rate drops
+          below threshold. Self-monitoring AI that benches itself when underperforming. Live from{' '}
+          <code>GET /auditor</code>.
+        </p>
+        {auditorError && <div className="health-error">{auditorError.message}</div>}
+        {auditorStatus && (
+          <>
+            <div className="health-row">
+              <span className={`status-dot ${auditorStatus.quarantined ? 'status-dot-down' : 'status-dot-ok'}`} />
+              <span className="health-status-label">
+                {auditorStatus.quarantined ? 'Quarantined — money actions held for human review' : 'Extractor trusted'}
+              </span>
+            </div>
+            <div className="health-stats" style={{ marginTop: '0.75rem' }}>
+              <div>
+                <span className="health-stat-value">{auditorStatus.sample_count}</span>
+                <span className="health-stat-label">extractions sampled</span>
+              </div>
+              <div>
+                <span className="health-stat-value">
+                  {auditorStatus.rolling_agreement === null ? '—' : `${Math.round(auditorStatus.rolling_agreement * 100)}%`}
+                </span>
+                <span className="health-stat-label">
+                  rolling agreement (last {auditorStatus.rolling_window} samples)
+                </span>
+              </div>
+              <div>
+                <span className="health-stat-value">{Math.round(auditorStatus.quarantine_threshold * 100)}%</span>
+                <span className="health-stat-label">quarantine threshold</span>
+              </div>
+            </div>
+            {auditorStatus.drift_log.length > 0 && (
+              <>
+                <h3 style={{ fontSize: '0.85rem', margin: '1.1rem 0 0.4rem', color: 'var(--text-dim)' }}>
+                  Drift log
+                </h3>
+                <ul className="policy-list">
+                  {auditorStatus.drift_log.map((d, i) => (
+                    <li key={i}>
+                      <strong>{d.event}</strong> at {d.ts} — rolling agreement {Math.round(d.rolling_agreement * 100)}%
+                      over {d.sample_count} samples
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {auditorStatus.sample_count === 0 && (
+              <p className="panel-sub" style={{ margin: '0.5rem 0 0' }}>
+                No extractions sampled yet — press Advance Day to run the world forward.
+              </p>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="panel">
         <h2>Agent parameters</h2>
         <p className="panel-sub">
           Read-only mirror of <code>config/agents.yaml</code>, loaded by <code>engine/config.py</code>. Precedence:
@@ -139,14 +200,19 @@ export default function SystemHealthScreen() {
             )}
 
             <h3 style={{ fontSize: '0.85rem', margin: '1.1rem 0 0.4rem', color: 'var(--text-dim)' }}>
-              Auditor <span className="placeholder-value">(not wired until the Auditor packet, Day 7)</span>
+              Auditor <span className="placeholder-value">(wired)</span>
             </h3>
             {auditor && (
               <ul className="policy-list">
                 <li><strong>sample_rate</strong> — <code>{auditor.sample_rate}</code></li>
                 <li><strong>quarantine_threshold</strong> — <code>{auditor.quarantine_threshold}</code></li>
+                <li><strong>rolling_window</strong> — <code>{auditor.rolling_window}</code></li>
               </ul>
             )}
+            <p className="panel-sub" style={{ margin: '0.4rem 0 0' }}>
+              Live sampling, rolling agreement, and quarantine state are in the &quot;Auditor — accuracy agent&quot;
+              card above.
+            </p>
 
             <h3 style={{ fontSize: '0.85rem', margin: '1.1rem 0 0.4rem', color: 'var(--text-dim)' }}>
               Judgment

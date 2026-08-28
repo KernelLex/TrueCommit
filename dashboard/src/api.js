@@ -63,6 +63,9 @@ export const api = {
   // status — everything the System Health "Agent parameters" and live
   // status cards render comes from this one call.
   config: () => request('/config'),
+  // Auditor packet (2026-08-28): live rolling agreement rate, quarantine
+  // state, and the drift log — master doc §7.3's "live accuracy widget".
+  auditor: () => request('/auditor'),
   world: () => request('/world'),
 
   // ---- Packet P10: the Day Story surface --------------------------------

@@ -222,6 +222,15 @@ class Ledger:
         self.paused: dict[str, bool] = {}
         """entity_id -> merchant kill-switch. True = no outbound action of any
         kind, from any path."""
+        self.auditor_quarantined: bool = False
+        """The Auditor's (engine/action/auditor.py, master doc §7.3) self-
+        monitoring flag: when its rolling extraction-agreement rate falls
+        below its quarantine threshold, this becomes True and EVERY money
+        action goes through `_decide_money_action`'s hold path regardless of
+        that extraction's own confidence — the same queue a single
+        low-confidence read already uses, not a second mechanism. Set via
+        `set_auditor_quarantine()`, read-only everywhere else, the same
+        shape as `self.paused` above."""
 
         self.gate_log: list[GateRecord] = []
         """Every `_gate()` call, with the full per-bound checklist it computed
@@ -532,17 +541,26 @@ class Ledger:
             ("link", {"amount_inr": amount}, "mandate blocked, falling back to payment link"),
         )
         confidence = self.extraction_confidence.get(entity.entity_id)
-        gated = confidence is not None and confidence < MONEY_ACTION_CONFIDENCE_GATE
+        conf_gated = confidence is not None and confidence < MONEY_ACTION_CONFIDENCE_GATE
+        # The Auditor's quarantine outranks a single extraction's own
+        # confidence: even a 0.99-confidence read is held while the
+        # extractor as a WHOLE is under quarantine (master doc §7.3's
+        # "self-monitoring AI that benches itself"). Same queue, same hold
+        # mechanism — quarantine is a reason to hold, not a second gate.
+        gated = conf_gated or self.auditor_quarantined
 
         for kind, params, reason in candidates:
             if not self._gate(entity, kind, params, now).allowed:
                 continue
             if gated:
-                self._hold_action(
-                    entity, kind, params, reason,
-                    f"confidence {confidence:.2f} < {MONEY_ACTION_CONFIDENCE_GATE:.2f} money gate",
-                    now,
-                )
+                if self.auditor_quarantined:
+                    hold_reason = (
+                        "extractor quarantined by Auditor (rolling agreement rate below "
+                        "quarantine threshold) — routed to human review until it recovers"
+                    )
+                else:
+                    hold_reason = f"confidence {confidence:.2f} < {MONEY_ACTION_CONFIDENCE_GATE:.2f} money gate"
+                self._hold_action(entity, kind, params, reason, hold_reason, now)
                 return None
             self._record_touch(entity, now)
             return self._emit_action(entity, kind, params, reason, now)
@@ -1006,3 +1024,18 @@ class Ledger:
 
     def paused_entities(self) -> list[str]:
         return sorted(eid for eid, is_paused in self.paused.items() if is_paused)
+
+    def set_auditor_quarantine(self, quarantined: bool, now: dt.datetime, detail: dict | None = None) -> None:
+        """The Auditor's own drift event, mirrored into the SAME append-only
+        trail every other decision writes into (master doc §7.3: "every
+        quarantine/restore event in the audit trail"). Called only when the
+        state actually flips (the caller — `WorldRunner` — is responsible for
+        not calling this on every sample), so the trail shows drift events,
+        not a repeated no-op."""
+        self._audit(
+            "SYSTEM", "auditor",
+            "extractor quarantined (rolling agreement below threshold)" if quarantined
+            else "extractor quarantine lifted (rolling agreement recovered)",
+            {"quarantined": quarantined, **(detail or {})}, now,
+        )
+        self.auditor_quarantined = quarantined
