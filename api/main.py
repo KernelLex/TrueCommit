@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from typing import Literal
 from urllib.parse import quote
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
@@ -49,6 +50,20 @@ general-purpose manual-injection route must not be a second door onto it: the
 ONLY way to fire it is `POST /entities/{id}/resolve-handoff`, which additionally
 refuses any entity that is not an open handoff or dispute."""
 
+load_dotenv()
+# Loaded HERE, once, at module import — before the first WorldRunner is ever
+# constructed. Without this, `WorldRunner.__init__`'s `_real_telephony_enabled()`
+# / `_real_razorpay_enabled()` / `_real_tts_enabled()` / `_real_telegram_enabled()`
+# (engine/integration/runner.py) read raw `os.environ`, which is empty for
+# anything that only lives in `.env` on a process nobody has otherwise loaded
+# it into — so the real-dispatch opt-in flags would silently resolve to their
+# defaults regardless of `.env`, while `engine/action/telephony.py`'s own
+# `is_configured()`/`_credentials()` (which each call `load_dotenv()` lazily,
+# on every use) would still find the real credentials. That mismatch is real
+# and was hit live: `PK_REAL_TELEPHONY=1` in `.env` had no effect on a freshly
+# started server because nothing had loaded it yet (found 2026-08-28 — see
+# tracking/BUILD_LOG.md). `load_dotenv()`'s default `override=False` means
+# this is a no-op if the shell already exported these vars some other way.
 runner = WorldRunner()
 ledger = runner.ledger
 
@@ -873,7 +888,10 @@ async def telephony_ivr_response(entity_id: str, request: Request) -> Response:
                 "subscription_id": result["subscription"].get("id"), "short_url": short_url,
                 "razorpay_mode": "test", "contact_source": resolved["source"],
             }
-            confirm_text = "Your automatic payment has been set up. Check your messages for the confirmation link."
+            message_text = (
+                f"Your automatic payment for {entity_id}, Rs.{invoice.amount_inr:,}, is scheduled "
+                f"for {debit_date}. Approve or manage it here: {short_url}"
+            )
         else:
             result = razorpay_client.create_payment_link(invoice.amount_inr, description, customer)
             short_url = result.get("short_url")
@@ -882,7 +900,7 @@ async def telephony_ivr_response(entity_id: str, request: Request) -> Response:
                 "payment_link_id": result.get("id"), "short_url": short_url,
                 "razorpay_mode": "test", "contact_source": resolved["source"],
             }
-            confirm_text = "A payment link has been sent to your messages."
+            message_text = f"Payment link for {entity_id}, Rs.{invoice.amount_inr:,}: {short_url}"
     except RazorpayError as exc:
         runner.audit_manual(
             entity_id, f"IVR: {kind} creation FAILED (debtor selected on a live call)",
@@ -894,6 +912,40 @@ async def telephony_ivr_response(entity_id: str, request: Request) -> Response:
         )
 
     runner.audit_manual(entity_id, f"IVR: {kind} created (debtor selected on a live call)", audit_detail)
+
+    # The Razorpay object existing is not the same as the debtor HAVING the
+    # link — earlier live testing found the spoken "check your messages"
+    # promise was never backed by an actual send (tracking/BUILD_LOG.md,
+    # 2026-08-28). Same real-dispatch gate as the call itself
+    # (`real_telephony_contact`): opt-in, credential, real submitted contact.
+    # Falls back to an honest spoken line, never a false promise, when a real
+    # send isn't possible (e.g. this number never joined the Twilio WhatsApp
+    # sandbox) or fails.
+    real_contact = runner.real_telephony_contact(entity_id)
+    if real_contact:
+        try:
+            wa_result = telephony.send_whatsapp(real_contact, message_text)
+        except telephony.TelephonyError as exc:
+            runner.audit_manual(
+                entity_id, "IVR: real WhatsApp confirmation FAILED (link/mandate still created)",
+                {"kind": kind, "contact": real_contact, "error": str(exc)},
+            )
+            confirm_text = "Your confirmation link could not be messaged to you — please contact support."
+        else:
+            runner.audit_manual(
+                entity_id, "IVR: real WhatsApp confirmation sent",
+                {"kind": kind, "contact": real_contact, "whatsapp_sid": wa_result["sid"]},
+            )
+            confirm_text = (
+                "Your automatic payment has been set up. A confirmation message is on its way."
+                if kind == "mandate_offer" else
+                "A payment link has been sent to your WhatsApp."
+            )
+    else:
+        confirm_text = (
+            "Your automatic payment has been set up." if kind == "mandate_offer" else
+            "Your payment link has been created."
+        )
     return _ivr_hangup_response(confirm_text)
 
 

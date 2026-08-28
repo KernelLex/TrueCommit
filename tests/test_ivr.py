@@ -241,10 +241,13 @@ def test_ivr_response_digit_1_creates_a_real_mandate_via_the_direct_unconditiona
             "subscription": {"id": "sub_TEST", "short_url": "https://rzp.io/rzp/TEST"},
         },
     )
+    wa_calls = []
+    monkeypatch.setattr(telephony, "send_whatsapp", lambda *a, **k: wa_calls.append(a))
     r = client.post("/telephony/ivr-response", params={"entity_id": "INV-001"}, data={"Digits": "1"})
     assert r.status_code == 200
     assert len(calls) == 1, "the mandate call must be made exactly once, directly, not through the rate-limited autonomous path"
     assert "automatic payment has been set up" in r.text
+    assert wa_calls == [], "no real contact was ever submitted for this entity — no real WhatsApp send should be attempted"
 
     from api.main import ledger as live_ledger
     entries = [a for a in live_ledger.audit if a.entity_id == "INV-001" and "IVR: mandate_offer created" in a.summary]
@@ -286,10 +289,81 @@ def test_ivr_response_digit_2_creates_a_real_payment_link(client, monkeypatch):
         razorpay_client, "create_payment_link",
         lambda *a, **k: calls.append(a) or {"id": "plink_TEST", "short_url": "https://rzp.io/rzp/LINK"},
     )
+    wa_calls = []
+    monkeypatch.setattr(telephony, "send_whatsapp", lambda *a, **k: wa_calls.append(a))
     r = client.post("/telephony/ivr-response", params={"entity_id": "INV-001"}, data={"Digits": "2"})
     assert r.status_code == 200
     assert len(calls) == 1
-    assert "payment link has been sent" in r.text
+    assert "payment link has been created" in r.text
+    assert wa_calls == [], "no real contact was ever submitted for this entity — no real WhatsApp send should be attempted"
+
+
+def test_ivr_response_sends_a_real_whatsapp_confirmation_when_the_gate_allows_it(client, monkeypatch):
+    """The actual gap the user hit live (2026-08-28, tracking/BUILD_LOG.md):
+    the call worked, pressing 1/2 worked, but no confirmation message ever
+    arrived — the real Razorpay object was created and the debtor was told
+    "check your messages," but nothing ever actually sent one. Pins the fix:
+    when the real-dispatch gate allows it (same shape as the call itself —
+    opt-in, credential, real submitted contact), a real WhatsApp send is
+    genuinely attempted with the real short_url in it."""
+    from api.main import runner as live_runner
+
+    live_runner.real_telephony = True
+    monkeypatch.setattr(telephony, "is_configured", lambda: True)
+    client.post("/entities/INV-001/contact", json={"name": "Amogh", "phone": "9611550053"})
+
+    monkeypatch.setattr(
+        razorpay_client, "create_payment_link",
+        lambda *a, **k: {"id": "plink_TEST", "short_url": "https://rzp.io/rzp/LINK"},
+    )
+    wa_calls = []
+    monkeypatch.setattr(
+        telephony, "send_whatsapp",
+        lambda to, text: wa_calls.append((to, text)) or {"sid": "SMxxxx", "status": "queued", "to": to, "from": "whatsapp:+14155238886"},
+    )
+
+    r = client.post("/telephony/ivr-response", params={"entity_id": "INV-001"}, data={"Digits": "2"})
+    assert r.status_code == 200
+    assert "sent to your WhatsApp" in r.text
+    assert len(wa_calls) == 1
+    to, text = wa_calls[0]
+    assert to == "9611550053"
+    assert "https://rzp.io/rzp/LINK" in text
+    assert "Rs.40,000" in text
+
+    from api.main import ledger as live_ledger
+    entries = [a for a in live_ledger.audit if a.entity_id == "INV-001" and "real WhatsApp confirmation sent" in a.summary]
+    assert len(entries) == 1
+    assert entries[0].detail["whatsapp_sid"] == "SMxxxx"
+
+
+def test_ivr_response_whatsapp_confirmation_failure_is_audited_not_swallowed(client, monkeypatch):
+    from api.main import runner as live_runner
+
+    live_runner.real_telephony = True
+    monkeypatch.setattr(telephony, "is_configured", lambda: True)
+    client.post("/entities/INV-001/contact", json={"name": "Amogh", "phone": "9611550053"})
+    monkeypatch.setattr(
+        razorpay_client, "create_payment_link",
+        lambda *a, **k: {"id": "plink_TEST", "short_url": "https://rzp.io/rzp/LINK"},
+    )
+
+    def _boom(to, text):
+        raise telephony.TelephonyError("recipient has not joined the sandbox")
+
+    monkeypatch.setattr(telephony, "send_whatsapp", _boom)
+
+    r = client.post("/telephony/ivr-response", params={"entity_id": "INV-001"}, data={"Digits": "2"})
+    assert r.status_code == 200
+    assert "could not be messaged" in r.text
+
+    from api.main import ledger as live_ledger
+    entries = [a for a in live_ledger.audit if a.entity_id == "INV-001" and "WhatsApp confirmation FAILED" in a.summary]
+    assert len(entries) == 1
+    assert "sandbox" in entries[0].detail["error"]
+    # the Razorpay object itself is unaffected by the confirmation failing
+    created = [a for a in live_ledger.audit if a.entity_id == "INV-001" and "IVR: link created" in a.summary]
+    assert len(created) == 1
 
 
 def test_ivr_response_invalid_digit_never_calls_razorpay(client, monkeypatch):
