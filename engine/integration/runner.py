@@ -117,11 +117,14 @@ from engine.action.messenger import Messenger, Rail
 from engine.action.razorpay_client import RazorpayError
 from engine.action.sentinel import MAX_RETRIES, Sentinel
 from engine.action import telegram_bot, telephony, tts
+from engine.judgment import trust
 from engine.judgment.ledger import Ledger
 from engine.judgment.state_machine import MAX_TOUCHES_PER_WEEK, TERMINAL_STATES, TOUCH_WINDOW_DAYS
 from engine.perception.providers import get_provider
 from engine.schemas import Action, AuditEntry, Cart, Event, Extraction, Invoice, Message
-from sim.personas import decide_mandate_move, decide_reply_move, keeps_promise, mandate_executes
+from sim.personas import (
+    debit_failure_reason, decide_mandate_move, decide_reply_move, keeps_promise, mandate_executes,
+)
 from sim.run import (
     CONDITIONAL_DUE_OFFSET,
     FIRM_DUE_OFFSET,
@@ -750,31 +753,67 @@ class WorldRunner:
         self._emit("promise_kept" if kept else "promise_broken", entity_id, {}, day)
 
     def _resolve_mandate_execution(self, day: int, entity_id: str) -> None:
+        """Debit-failure taxonomy (2026-08-30, master doc's own recovery-
+        hierarchy reasoning extended to WHY a debit bounced — see
+        engine/schemas.py's `DebitFailureReason` and
+        `state_machine.py`'s `mandate_execute_failed` handling for the full
+        per-reason routing). Scene-1 only (uses `self._persona`); Scene 2's
+        scripted cart mandates (`_resolve_cart_mandate_execute` etc.) are
+        deliberately left as their own always-succeeds narrative beats — see
+        tracking/DECISIONS.md 2026-08-30 for why this feature was scoped to
+        Scene 1 rather than also perturbing the just-built Scene 2 demo."""
         entity = self.ledger.entities.get(entity_id)
         if entity is None or entity.state in TERMINAL_STATES:
             self._mandate_pending.discard(entity_id)
             return
-        ok = mandate_executes(self.rng, self._persona(entity_id))
+        persona = self._persona(entity_id)
+        ok = mandate_executes(self.rng, persona)
         amount = entity.invoice_amount_inr  # ledger record, never the extraction
-        action = self._emit(
-            "mandate_execute_success" if ok else "mandate_execute_failed",
-            entity_id, {"amount_inr": amount}, day,
-        )
-        # `_emit` always appends the Event before deciding whether a further
-        # Action is needed — a successful execution usually needs none (the
-        # entity lands straight on the terminal state KEPT), so `action` is
-        # routinely None here even though the debit genuinely happened. The
-        # EVENT itself, not the (often absent) Action, is what the
-        # post-debit notice quotes as its transaction reference.
-        event_ref = self.events[-1].event_id
+
         if ok:
+            self._emit("mandate_execute_success", entity_id, {"amount_inr": amount}, day)
+            # `_emit` always appends the Event before deciding whether a
+            # further Action is needed — a successful execution usually
+            # needs none (the entity lands straight on the terminal state
+            # KEPT), so the Action is routinely None even though the debit
+            # genuinely happened. The EVENT itself, not the (often absent)
+            # Action, is what the post-debit notice quotes as its
+            # transaction reference.
+            event_ref = self.events[-1].event_id
             self._mandate_pending.discard(entity_id)
             self._send_post_debit_notice(entity_id, event_ref, day)
             return
-        if action is not None and action.kind == "mandate_execute":
-            self._schedule_at(day + 1, "mandate_execute", entity_id, {})  # the one allowed retry
-        else:
-            self._mandate_pending.discard(entity_id)
+
+        reason = debit_failure_reason(self.rng, persona)
+        action = self._emit(
+            "mandate_execute_failed", entity_id, {"amount_inr": amount, "reason": reason}, day,
+        )
+
+        if reason == "bank_downtime":
+            # Not a real attempt at all (state_machine.py leaves state/retry
+            # budget untouched) — reschedule exactly like the original
+            # attempt: same day-offset, no touch, no trust move.
+            self._schedule_at(day + 1, "mandate_execute", entity_id, {})
+            return
+
+        new_state = self.ledger.entities.get(entity_id)
+        if (
+            new_state is not None and new_state.state == "AT_RISK"
+            and action is not None and action.kind == "mandate_execute"
+        ):
+            # insufficient_funds / amount_exceeds_limit, first failure: the
+            # one allowed retry, at a trust-derived delay rather than a flat
+            # "+1 day" — trust.derive_retry_delay_days().
+            debtor_trust = self.ledger.current_trust(self._contact_key(entity_id), self._ts(day))
+            delay = trust.derive_retry_delay_days(debtor_trust)
+            self._schedule_at(day + delay, "mandate_execute", entity_id, {})
+            return
+
+        # Retry exhausted (LINKED, trust-derived shrunk-tranche link already
+        # dispatched by `_decide_action`), or a reason that skips AT_RISK
+        # entirely (mandate_revoked -> escalated; account_closed_frozen ->
+        # LINKED at full amount, both already dispatched the same way).
+        self._mandate_pending.discard(entity_id)
 
     def _resolve_pre_debit_notice(self, day: int, entity_id: str, data: dict) -> None:
         """RBI E-Mandate Framework: the T-1 warning, due the day before a

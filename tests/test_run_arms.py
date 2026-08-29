@@ -67,11 +67,17 @@ def test_arm_c_reconciles_exactly_against_the_pinned_whole_world_figure():
     stale, not this reconciliation. (Before 2026-08-29 the third term was 0,
     because non-reserve carts got zero follow-through at all — see
     tracking/BUILD_LOG.md.)
+
+    2026-08-30 (debit-failure taxonomy): Arm C's OWN invoice-only figure
+    moved 2,324,347 -> 2,343,347 (+19,000) — this feature is Scene-1 (mandate
+    execution), squarely inside Arm C's own scope, unlike the Scene-2-only
+    change above. The whole-world canonical figure moved by the identical
+    +19,000, so the reconciliation still holds exactly.
     """
     result = run_arm_c(seed=42)
     RESERVE_CART_TOTAL_INR = 1_899 + 5_250  # C-09 + C-10, Tier-0
     NON_RESERVE_CART_RECOVERED_INR = 2_499 + 2_499  # C-05 (timing) + C-07 (trust, happy path)
-    CANONICAL_WHOLE_WORLD_RECOVERED_INR = 2_336_494
+    CANONICAL_WHOLE_WORLD_RECOVERED_INR = 2_355_494
     assert (
         result["recovered_amount_inr"] + RESERVE_CART_TOTAL_INR + NON_RESERVE_CART_RECOVERED_INR
         == CANONICAL_WHOLE_WORLD_RECOVERED_INR

@@ -386,12 +386,57 @@ def transition(entity: EntityState, event_type: str, payload: dict[str, Any], no
     elif event_type == "mandate_execute_success":
         entity.state = "KEPT"
     elif event_type == "mandate_execute_failed":
-        if entity.retry_count < RETRY_ON_EXECUTION_FAILURE:
+        # Debit-failure taxonomy (2026-08-30, master doc's own recovery-
+        # hierarchy reasoning extended to WHY a debit bounced): a failed
+        # debit is NOT automatically a broken promise. See
+        # engine/schemas.py's `DebitFailureReason` docstring and
+        # tracking/AI_JUDGMENT.md for the full per-reason argument this
+        # branch implements. `reason` absent (or unrecognized) falls back to
+        # the ORIGINAL undifferentiated behavior below — every caller before
+        # this feature existed, and any manual/test event that omits it,
+        # keeps working exactly as before.
+        reason = payload.get("reason")
+        if reason == "bank_downtime":
+            pass  # not the debtor's fault, not even a real attempt: no state
+                  # change, no retry spent, no trust move — WorldRunner
+                  # re-schedules the same execution on the same rail.
+        elif reason == "account_closed_frozen":
+            # The rail itself is dead. No retry regardless of remaining
+            # budget — retrying a closed/frozen account cannot ever
+            # succeed — straight to the link fallback, no escalation (this
+            # is an infrastructure fact, not a willingness signal) and no
+            # future mandate re-offer (mirrors the post-refusal bound).
+            entity.mandate_refused = True
+            entity.state = "LINKED"
+        elif reason == "mandate_revoked":
+            # A genuine willingness signal — the debtor killed the standing
+            # instruction before this debit. Skips the AT_RISK grace
+            # entirely (there is nothing to "retry" against a revoked
+            # mandate) and escalates immediately; also blocks any future
+            # mandate re-offer, same reasoning as an explicit refusal.
+            entity.mandate_refused = True
+            entity = _escalate(entity)
+        elif entity.retry_count < RETRY_ON_EXECUTION_FAILURE:
+            # insufficient_funds / amount_exceeds_limit / no reason given:
+            # a timing or sizing problem, not willingness — give the one
+            # allowed retry exactly as before.
             entity.retry_count += 1
             entity.state = "AT_RISK"
         else:
+            # Retry exhausted. FIXED 2026-08-30 (found while testing this
+            # packet, tracking/BUILD_LOG.md same date): this branch used to
+            # read `entity.state = "LINKED"; entity = _escalate(entity)` —
+            # but `_escalate()` unconditionally OVERWRITES `.state` again, so
+            # the "LINKED" assignment was pure dead code and this path had
+            # NEVER actually produced a link, contradicting master doc
+            # §3.5's own jump-back matrix verbatim: "same-day polite retry
+            # x1 -> payment link -> ladder resumes at current stage." No
+            # existing test pinned the old (wrong) ESCALATE_1 behavior, so
+            # nothing relied on the bug. `escalate_stage` is deliberately
+            # left untouched here — the ladder position "resumes" from
+            # wherever it already was if a LATER event escalates further,
+            # rather than this fallback secretly advancing it on its own.
             entity.state = "LINKED"
-            entity = _escalate(entity)
     elif event_type == "promise_kept":
         entity.state = "KEPT"
     elif event_type == "promise_broken":

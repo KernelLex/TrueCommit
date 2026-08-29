@@ -88,30 +88,43 @@ def test_the_45_day_distribution_is_the_number_the_docs_quote(world: WorldRunner
     Rs.2,499) and the happy-path trust-cause cart (C-07, Rs.2,499) now
     actually recover — before this the non-reserve carts were triaged for
     their cause and then abandoned with zero follow-through action, a real
-    gap (see tracking/BUILD_LOG.md 2026-08-29). This test's own `distribution`
-    assertion below is Scene-1-invoice-only (`active_invoice_ids`) and is
-    UNCHANGED by this — Scene 2 carts are a disjoint entity population.
+    gap (see tracking/BUILD_LOG.md 2026-08-29). That change's own
+    `distribution` was Scene-1-invoice-only and unaffected (Scene 2 carts are
+    a disjoint entity population) — the block below is NOT that case.
+
+    2026-08-30 (debit-failure taxonomy): THIS change DOES move `distribution`
+    (KEPT 21->22, HUMAN_HANDOFF 27->26) — it's a Scene-1 mandate-execution
+    feature, not a Scene-2 one. `recovered_inr` moved 2,336,494 -> 2,355,494
+    (+19,000, matching Arm C's own invoice-only figure moving by the exact
+    same amount — `tests/test_run_arms.py`'s reconciliation test pins that
+    equality). `promises` moved because inserting a NEW RNG draw (which
+    NACH/eMandate reason a bounced debit carries — `sim.personas.
+    debit_failure_reason`) into the same shared persona stream every OTHER
+    persona decision already draws from necessarily shifts every downstream
+    draw for the rest of the run; a promise/mandate outcome elsewhere in the
+    sequence landed differently as a genuine, measured, not hand-picked,
+    consequence — see tracking/BUILD_LOG.md 2026-08-30 for the full
+    reconciliation and why that RNG-stream choice is the correct one (this is
+    a persona-behavior question, not a meta/analysis feature that needs its
+    own isolated stream the way the Auditor's does).
     """
     states = _invoice_states(world)
     distribution: dict[str, int] = {}
     for state in states.values():
         distribution[state] = distribution.get(state, 0) + 1
 
-    assert distribution == {"KEPT": 21, "HUMAN_HANDOFF": 27, "DISPUTED": 3}
+    assert distribution == {"KEPT": 22, "HUMAN_HANDOFF": 26, "DISPUTED": 3}
 
     summary = world.funnel_summary()
-    assert summary["recovered_inr"] == 2_336_494
+    assert summary["recovered_inr"] == 2_355_494
     active_value = sum(
         world.ledger.entities[eid].invoice_amount_inr for eid in world.active_invoice_ids
     )
     assert active_value == 6_971_068
-    # `recovered_inr` also carries Scene-2 cart recoveries (a disjoint entity
-    # population, not part of `active_value`), so this ratio ticked up
-    # alongside the 2026-08-29 change above, from 33.4 to 33.5.
-    assert round(100 * summary["recovered_inr"] / active_value, 1) == 33.5
+    assert round(100 * summary["recovered_inr"] / active_value, 1) == 33.8
 
-    assert summary["promises"] == {"broken": 14, "kept": 18, "pending": 6}
-    assert summary["messages_sent"] == 124
+    assert summary["promises"] == {"broken": 12, "kept": 19, "pending": 6}
+    assert summary["messages_sent"] == 126
     assert summary["held_actions_total"] == 4
     assert summary["dead_letter"] == 0
     assert world.bound_violations() == []
@@ -572,12 +585,24 @@ def test_any_reply_opens_every_instrument_still_inside_its_window(world: WorldRu
         assert entry.detail["kind"] in ("link", "mandate_offer")
 
     # every debtor who confirmed a mandate had their offer opened, and none of
-    # them is flagged as having refused one
+    # them is flagged as having refused one THROUGH THE LINK-TIMEOUT PATH —
+    # the P11 bug this test guards against. A confirmer CAN legitimately end
+    # up `mandate_refused=True` a different, real way since 2026-08-30: the
+    # debit-failure taxonomy's `mandate_revoked`/`account_closed_frozen`
+    # reasons bar a future re-offer even though the ORIGINAL confirmation was
+    # completely genuine (`tracking/DECISIONS.md` 2026-08-30) — that is not
+    # the phantom-timeout bug reappearing, so it's excluded here rather than
+    # weakening the check.
     confirmers = {a.entity_id for a in world.ledger.audit
                   if a.detail.get("move") == "confirm_mandate"}
     assert len(confirmers) > 1
     assert confirmers <= {a.entity_id for a in opened}
-    assert not [e for e in confirmers if world.ledger.entities[e].mandate_refused]
+    phantom_refused = [
+        e for e in confirmers
+        if world.ledger.entities[e].mandate_refused
+        and world.ledger.debit_failure_reason.get(e) not in ("mandate_revoked", "account_closed_frozen")
+    ]
+    assert not phantom_refused
 
 
 def test_true_silence_still_soft_refuses_after_48h(world: WorldRunner):
@@ -625,7 +650,17 @@ def test_the_only_refusals_left_are_ones_a_debtor_actually_made(world: WorldRunn
     45-day run produced 13 `mandate_refused` events, 10 of them manufactured by
     the timeout — barring 10 entities from any future mandate offer (bound #7)
     when only 4 had earned it. After it: 3 explicit debtor refusals
-    (`refuse_but_promise`) + 1 genuine 48h silence."""
+    (`refuse_but_promise`) + 1 genuine 48h silence.
+
+    `mandate_refused=True` gained a SECOND, independent, legitimate source on
+    2026-08-30: the debit-failure taxonomy's `mandate_revoked`/
+    `account_closed_frozen` reasons also bar a future re-offer, with no
+    `mandate_refused` EVENT at all (a different code path entirely — see
+    `state_machine.py`'s `mandate_execute_failed` handling). This test still
+    pins the ORIGINAL mechanism's event count exactly as before, and checks
+    the flag-level `barred` set in two clearly separated groups so a
+    regression in either mechanism is still caught on its own terms.
+    """
     refusals = [e for e in world.events if e.type == "mandate_refused"]
     by_reason: dict[str, int] = {}
     for event in refusals:
@@ -636,12 +671,20 @@ def test_the_only_refusals_left_are_ones_a_debtor_actually_made(world: WorldRunn
         "mandate link never opened (soft refusal)": 1,
     }
     barred = sorted(eid for eid, e in world.ledger.entities.items() if e.mandate_refused)
-    assert barred == ["INV-002", "INV-003", "INV-007", "INV-011"]
+    barred_by_debit_failure = sorted(
+        eid for eid in barred
+        if world.ledger.debit_failure_reason.get(eid) in ("mandate_revoked", "account_closed_frozen")
+    )
+    barred_by_refusal_event = sorted(eid for eid in barred if eid not in barred_by_debit_failure)
 
-    # ...and every one of them traces to a real debtor move in the trail
+    assert barred_by_refusal_event == ["INV-002", "INV-003", "INV-007", "INV-011"]
+    assert barred_by_debit_failure == ["INV-066"]
+    assert world.ledger.debit_failure_reason["INV-066"] == "mandate_revoked"
+
+    # ...and every refusal-event bar traces to a real debtor move in the trail
     moves = {a.entity_id: a.detail["move"] for a in world.ledger.audit
              if a.summary.startswith("debtor mandate move:")}
-    assert {moves[eid] for eid in barred} == {"refuse_but_promise", "ignore"}
+    assert {moves[eid] for eid in barred_by_refusal_event} == {"refuse_but_promise", "ignore"}
 
 
 def test_termination_sweep_only_fires_after_the_touch_schedule_is_done(world: WorldRunner):

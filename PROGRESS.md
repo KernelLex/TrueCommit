@@ -1,5 +1,5 @@
 # PROGRESS.md — Promise Keeper build status
-### Last updated: 2026-08-29 (Scene 2's cause → instrument follow-through built — the pre-agreed cut order's item #2, built per the user's explicit "build all the features" request; Track A / IVR + the Auditor already built 2026-08-28; Track B / WhatsApp remains not started, not currently selected) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
+### Last updated: 2026-08-30 (7-packet plan issued past the original cut order — debit-failure taxonomy [Packet 1] done; debtor-level judgment, red-team suite, acceptance learning, UI pass, live-channel demo, doc hygiene queued next, in that order) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
 
 > **Handing over between Claude sessions? Read `HANDOVER.md` first** — it carries the build mechanism (three-tier orchestration), the laws, the resume procedure, and the in-flight packet specs.
 
@@ -7,29 +7,49 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 
 ---
 
-## 🚦 STATUS SNAPSHOT — what's done, what's ASAP (2026-08-29, 3 days to freeze)
+## 🚦 STATUS SNAPSHOT — what's done, what's ASAP (2026-08-30, freeze is imminent)
 
-**Engineering-wise, the pre-agreed cut order is fully built.** CLAUDE.md's own scope-cut sequence — Reserve failover beat → Scene 2 entirely → Auditor → TTS voice — is now **4 of 4 done** (Scene 2 was the last one, closed today). Track A (IVR) was also built and live-tested beyond the original day-by-day plan. There is currently **no unbuilt feature queued** against BUILD.md/master doc/CLAUDE.md's own scope — see `tracking/DECISIONS.md`'s cut-order note for the full list. This is worth saying plainly because it changes what "ASAP" means from here: the remaining work is Day 9–10 (video/README/submission) and demo prep, not more code.
+**The pre-agreed cut order (Reserve failover → Scene 2 → Auditor → TTS voice) finished 2026-08-29 at 4/4.** On 2026-08-30 the user issued a NEW, larger 7-packet plan that goes past that original scope — this is deliberate, explicit, past-freeze-date-aware new work, not scope creep discovered by accident. Built in strict order, one packet at a time, each tested/reconciled/pushed and reported before the next starts:
 
-**✅ Done (all tested, tracked, pushed):**
-- Full Scene 1 pipeline: triage → extraction (85%/90% accuracy gates cleared on 2 providers) → trust → state machine (all 8 bounds) → mandate/link conversion → escalation ladder → human handoff/dispute
-- Scene 2: Tier-0 reserve failover (0-touch) **and**, as of today, the cause → instrument layer for the other 10 carts (friction/price_shock/comparison/unknown → link, timing → scheduled mandate, trust → delivery-secured mandate with the revoke branch shown)
-- Reliability mesh: Sentinel (retry/backoff/dead-letter/circuit breaker, wired end to end including a genuine network-kill) + Auditor (accuracy self-monitoring, quarantine gate)
-- RBI E-Mandate Framework compliance: pre-debit (T-1) and post-debit notices, both live in every mandate execution
-- Real-world integrations, opt-in and rate-limited: Razorpay TEST mode (payment links, mandate registration, full create→execute→revoke lifecycle, human-verified), Twilio voice/IVR + WhatsApp, Telegram real dispatch
-- Dashboard: Funnel, Entity Timeline (mandate lifecycle stepper, guardrail panel), Trust Curves, Human Review queue, System Health (Sentinel + Auditor widgets)
-- 3-arm measured-vs-simulated comparison (`eval/run_arms.py` → `metrics.json`), mandate-acceptance sensitivity band, reproducibility locked at seed 42
-- **642/642 tests passing**, cold start verified from a fresh clone in 2 commands, no secrets in repo (grepped clean)
-- README expanded to BUILD.md's own Day-9 outline (verified stats, metrics tables, architecture diagram, real-vs-simulated table, limitations section)
+**Packet status:**
+1. ✅ **Debit-failure taxonomy** — DONE, 2026-08-30. See the dated section below for the full story.
+2. ⏳ **Debtor-level judgment** (trust/escalation lifted from invoice to debtor, allocation under the touch budget) — queued next.
+3. ⏳ **Adversarial red-team suite** (4 exploit personas, quantified damage, README section) — queued.
+4. ⏳ **Acceptance learning** (2nd Beta posterior over mandate registration, break-even number, dashboard meter) — queued.
+5. ⏳ **UI pass** (real browser check first, then make every packet above visible on screen) — queued.
+6. ⏳ **Live channel demo path** (IVR → real mandate → Telegram confirmation; WhatsApp free-form half only, no sandbox ContentSid templates) — queued.
+7. ⏳ **Doc hygiene** (4 stale PROGRESS.md contradictions, `whatsapp_meta.py` disposition) — to be done alongside, ~20 min.
 
-**⏭ ASAP, in order:**
-1. **The Day-9 30-second gif/screen-recording is still missing** — the one item on BUILD.md's own Day-9 outline not done, because no screen-recording tool has been available in this environment. This needs the user (or a machine with one) to record the dashboard time-warp — I can prep the exact sequence to record (which buttons, which screens, in what order) but cannot capture it myself.
-2. **`v1.0-freeze` git tag** — correctly still unchecked, date-gated for Sep 1 (BUILD.md Day 7), not a code task, just don't forget to actually tag it that day.
-3. **Day 10 submit checklist** — final repo cleanup pass, one more `grep -r "rzp_\|sk-ant"` sweep, package the video + architecture doc + track-selection writeup, submit by Sep 5.
-4. **Demo-day rehearsal** (BUILD.md §6) — none of this is started: a pre-recorded backup video for every live segment, the 5 "money-shot" beats rehearsed live (L1 extraction, mandate refusal + trust dip, dispute → evidence packet, Tier-0 reserve heal, the 3-arm table), and answers rehearsed for the 4 panel questions BUILD.md names. This is presentation prep, best done by the user with the app in front of them, not something to pre-build in code.
-5. **Track B (WhatsApp dual-path)** — explicitly not selected at the Track A/B gate, stays out of scope unless the user picks it up. Nothing pending here unless asked.
+**✅ Done before this plan (all tested, tracked, pushed) — still true, unaffected by the packets above except where noted:**
+- Full Scene 1 pipeline: triage → extraction (85%/90% accuracy gates cleared on 2 providers) → trust → state machine (all 8 bounds) → mandate/link conversion → escalation ladder → human handoff/dispute — **now includes the debit-failure taxonomy's reason-aware routing, Packet 1.**
+- Scene 2: Tier-0 reserve failover (0-touch) and the cause → instrument layer for the other 10 carts (friction/price_shock/comparison/unknown → link, timing → scheduled mandate, trust → delivery-secured mandate with the revoke branch shown) — deliberately NOT touched by the debit-failure taxonomy (`tracking/DECISIONS.md` 2026-08-30, Decision 3).
+- Reliability mesh: Sentinel (retry/backoff/dead-letter/circuit breaker) + Auditor (accuracy self-monitoring, quarantine gate), both with independent RNG streams unaffected by any of this.
+- RBI E-Mandate Framework compliance: pre-debit (T-1) and post-debit notices, both live in every mandate execution.
+- Real-world integrations, opt-in and rate-limited: Razorpay TEST mode (payment links, mandate registration, full create→execute→revoke lifecycle, human-verified), Twilio voice/IVR + WhatsApp, Telegram real dispatch.
+- Dashboard: Funnel, Entity Timeline (mandate lifecycle stepper, guardrail panel), Trust Curves, Human Review queue, System Health (Sentinel + Auditor widgets) — **Packet 5 will audit whether these actually reflect everything above on screen; not re-verified in a browser since 2026-08-26 per the user's own note.**
+- 3-arm measured-vs-simulated comparison (`eval/run_arms.py` → `metrics.json`), mandate-acceptance sensitivity band, reproducibility locked at seed 42 — **Arm C's own figures moved with Packet 1** (see below), regenerated and re-verified, not just its scope-note text.
+- **670/670 tests passing**, cold start verified from a fresh clone in 2 commands, no secrets in repo (grepped clean).
+- README expanded to BUILD.md's own Day-9 outline (verified stats, metrics tables, architecture diagram, real-vs-simulated table, limitations section) — **Packet 7 will fix 4 stale contradictions elsewhere in this file, not the README.**
 
-**Nothing else is silently outstanding.** If a new gap is found (the way Scene 2's was), it'll be flagged here and in `tracking/DECISIONS.md` before being built, per CLAUDE.md §6's reminder-of-cut-order-first rule.
+**⏭ ASAP, in order:** finish the remaining 6 packets above (2 is next), THEN the pre-existing Day-9/10 items are still genuinely outstanding underneath all of this: the 30-second gif (needs a screen-recording tool this environment doesn't have), the `v1.0-freeze` tag (date-gated, Sep 1), the Day-10 submit checklist, and demo-day rehearsal (BUILD.md §6) — none of that has moved since 2026-08-29 and none of it is code.
+
+---
+
+## Continuing development (2026-08-30) — Packet 1: debit-failure taxonomy
+
+**What was built:** a third real entry point into the judgment machine, alongside invoice-overdue and cart-abandoned — a bounced mandate execution, routed by a fixed 5-value NACH/eMandate reason enum (`engine/schemas.py`'s `DebitFailureReason`) to a distinct, audited recovery branch each: `insufficient_funds`/`amount_exceeds_limit` get the one allowed retry at a trust-derived delay then a trust-derived SHRUNK fallback link; `bank_downtime` retries silently at zero cost (no trust move, no retry spent); `account_closed_frozen` switches instrument permanently with no retry; `mandate_revoked` — the one genuine willingness signal — moves trust and escalates immediately.
+
+**The CRITICAL MODELING POINT, checked and confirmed real:** `trust.py` WAS applying a full trust penalty uniformly on any exhausted-retry mandate failure, regardless of why it bounced — exactly the bug flagged as worth checking for. Fixed by extending the project's own existing precedent (mandate refusal is pending-neutral) to four of the five reasons; only `mandate_revoked` costs trust.
+
+**A second, older bug found while testing the fix:** the exhausted-retry fallback had NEVER actually produced a payment link since this code was written — `entity.state = "LINKED"` was immediately overwritten by an unconditional `_escalate()` call, silently contradicting master doc §3.5's own spec ("...retry x1 -> payment link -> ladder resumes at current stage"). Fixed; no existing test had pinned the wrong behavior, so nothing broke, but 3 `test_integration.py` tests and 1 `test_run_arms.py` reconciliation needed their real, re-measured numbers.
+
+**Numbers, measured and reconciled:** whole-world `recovered_inr` ₹23,36,494 → ₹23,55,494 (+₹19,000); Arm C's own invoice-only figure moved by the identical amount (₹23,24,347 → ₹23,43,347 — `metrics.json` regenerated for real, not just its scope-note). `distribution` KEPT 21→22 / HUMAN_HANDOFF 27→26. `promises` shifted as a genuine downstream consequence of inserting one new RNG draw into the shared persona stream (argued in full in `tracking/DECISIONS.md` why this draw belongs in the shared stream, unlike the Auditor's dedicated one). Reproducibility re-verified byte-identical across two fresh runs.
+
+**Where the reason comes from, argued per the user's explicit ask:** bank-supplied ground truth in real production (a NACH return code on Razorpay's webhook), never an LLM inference; in this simulation (no live recurring-debit failures to observe), drawn from a new frozen per-persona table added to `sim/personas.py` — the first real edit to that file since the `personas-frozen` tag, argued explicitly in `tracking/DECISIONS.md` for why it does not violate the tag (it enriches WHY a failure happens, never touches WHETHER one does).
+
+**Tests:** `tests/test_debit_failure.py`, 28 new tests, pin every reason's state-machine routing, trust delta, and dispatched action directly (not left to the stochastic 45-day run, which only exercises 2 of 5 reasons for real). 670/670 total. Full detail: `tracking/BUILD_LOG.md`/`DECISIONS.md`/`AI_JUDGMENT.md`/`TRACK_BAR.md` §2, all dated 2026-08-30.
+
+**Reported and stopped per the user's own instruction — Packet 2 (debtor-level judgment) starts next, not started yet.**
 
 ---
 

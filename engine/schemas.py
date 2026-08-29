@@ -24,6 +24,34 @@ ExtractionLevel = Literal["L1", "L2", "L3", "L4", "L5"]
 CartDropStage = Literal["summary", "address", "payment"]
 CartCauseType = Literal["friction", "price_shock", "trust", "timing", "comparison", "unknown"]
 
+DebitFailureReason = Literal[
+    "insufficient_funds", "bank_downtime", "mandate_revoked",
+    "account_closed_frozen", "amount_exceeds_limit",
+]
+"""NACH/eMandate return-reason taxonomy for a bounced mandate execution
+(packet: "debit-failure taxonomy", 2026-08-30). A failed debit is NOT
+automatically a broken promise — see `engine/judgment/state_machine.py`'s
+`mandate_execute_failed` handling and `tracking/AI_JUDGMENT.md` for the full
+per-reason trust/retry argument:
+  insufficient_funds    -- timing problem, not willingness. Pending-neutral
+                           trust, re-presented later at a trust-derived date;
+                           a trust-derived SHRUNK tranche once the retry is
+                           exhausted (never the full mandate-execute amount —
+                           law 2 stays intact, only the fallback LINK shrinks).
+  bank_downtime          -- not the debtor's fault. Zero trust impact, does
+                           NOT spend the one allowed retry, silent same-
+                           channel retry.
+  mandate_revoked        -- a genuine willingness signal. Full trust penalty,
+                           skips the AT_RISK grace and escalates immediately.
+  account_closed_frozen  -- the rail itself is dead. No retry regardless of
+                           budget, immediate fallback to a payment link at
+                           the full amount, no trust penalty (not a
+                           willingness signal), and no future mandate offer
+                           (mirrors the post-refusal bound).
+  amount_exceeds_limit   -- a structural/config mismatch, not willingness.
+                           Same treatment as insufficient_funds.
+"""
+
 # Invoice root-cause taxonomy for Scene 1 triage (BUILD.md Day 3: "5 causes
 # defined" — not enumerated in BUILD.md's schema sketch, so fixed here;
 # see tracking/DECISIONS.md).

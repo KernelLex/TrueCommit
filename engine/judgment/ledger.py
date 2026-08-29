@@ -223,6 +223,12 @@ class Ledger:
         """entity_id -> merchant kill-switch. True = no outbound action of any
         kind, from any path."""
         self.cart_cause: dict[str, str] = {}
+        self.debit_failure_reason: dict[str, str] = {}
+        """entity_id -> the last `DebitFailureReason` recorded against a
+        `mandate_execute_failed` event (engine/schemas.py). Same pattern and
+        same reasoning as `cart_cause` above: a side table the reason-aware
+        LINKED fallback (`_decide_action`) reads to pick the right copy and
+        amount, never mutated by anything upstream of `process_event`."""
         """entity_id -> the Scene-2 cause the perception layer inferred for
         this cart (master doc §3.3). Read only by `_decide_money_action` /
         `_decide_action`'s LINKED branch to pick the matching instrument and
@@ -293,6 +299,15 @@ class Ledger:
         existing = self.trust.get(debtor_id)
         return trust.decay(existing, now) if existing else trust.new_trust(debtor_id, now)
 
+    def current_trust(self, debtor_id: str, now: dt.datetime) -> TrustState:
+        """Public, read-only view of a debtor's CURRENT (decayed) posterior —
+        the same value `_trust_for` computes internally, exposed for callers
+        outside the ledger that need to make a trust-DERIVED decision (e.g.
+        `WorldRunner`'s debit-failure re-presentment terms) without
+        duplicating the decay-application logic or reaching into a private
+        method."""
+        return self._trust_for(debtor_id, now)
+
     def _audit(self, entity_id: str, layer: str, summary: str, detail: dict, ts: dt.datetime) -> AuditEntry:
         self._audit_seq += 1
         entry = AuditEntry(id=f"AE-{self._audit_seq:05d}", entity_id=entity_id, layer=layer, summary=summary, detail=detail, ts=ts)
@@ -315,12 +330,15 @@ class Ledger:
         if event_type == "cart_abandoned":
             self.cart_cause[entity_id] = str(payload.get("cause", "unknown"))
 
+        if event_type == "mandate_execute_failed" and payload.get("reason"):
+            self.debit_failure_reason[entity_id] = str(payload["reason"])
+
         prev_state = entity.state
         new_state = state_machine.transition(entity, event_type, payload, now)
         self.entities[entity_id] = new_state
         self._audit(entity_id, "judgment", f"{event_type}: {prev_state} -> {new_state.state}", {"event": event_type, "payload": payload}, now)
 
-        self._update_trust(event_type, new_state, debtor_id, now)
+        self._update_trust(event_type, new_state, debtor_id, now, payload)
         self._update_promise(event_type, entity_id, debtor_id, new_state, payload, now)
 
         if event_type == "extraction_received":
@@ -365,12 +383,38 @@ class Ledger:
         self.entities[entity_id] = entity
         return action
 
-    def _update_trust(self, event_type: str, entity: EntityState, debtor_id: str, now: dt.datetime) -> None:
+    def _update_trust(self, event_type: str, entity: EntityState, debtor_id: str, now: dt.datetime, payload: dict) -> None:
         current = self._trust_for(debtor_id, now)
         if event_type in ("promise_kept", "mandate_execute_success"):
             self.trust[debtor_id] = trust.update_kept(current, now)
-        elif event_type in ("promise_broken",) or (event_type == "mandate_execute_failed" and entity.state != "AT_RISK"):
+        elif event_type == "promise_broken":
             self.trust[debtor_id] = trust.update_broken(current, now)
+        elif event_type == "mandate_execute_failed":
+            # Debit-failure taxonomy (2026-08-30). BEFORE this, EVERY
+            # mandate_execute_failed that exhausted its retry got a full
+            # trust.update_broken() regardless of why the debit bounced — a
+            # real modeling bug (an insufficient_funds re-attempt failing
+            # again is still a timing problem, not proof the debtor never
+            # intended to pay). See engine/schemas.py's DebitFailureReason
+            # docstring and tracking/AI_JUDGMENT.md for the full argument.
+            reason = payload.get("reason")
+            if reason == "mandate_revoked":
+                # The one reason that IS a genuine willingness signal.
+                self.trust[debtor_id] = trust.update_broken(current, now)
+            elif reason in ("insufficient_funds", "bank_downtime", "account_closed_frozen", "amount_exceeds_limit"):
+                # None of these four is evidence the debtor won't pay —
+                # pending-neutral regardless of whether this is the first
+                # attempt or the exhausted retry (the bug above was
+                # specifically in the exhausted-retry case).
+                self.trust[debtor_id] = trust.update_refusal(current, now)
+            elif entity.state != "AT_RISK":
+                # No reason on the event at all (a manual/legacy caller) —
+                # preserve the ORIGINAL undifferentiated behavior exactly,
+                # so nothing that fires this event without a reason payload
+                # changes behavior.
+                self.trust[debtor_id] = trust.update_broken(current, now)
+            else:
+                self.trust[debtor_id] = current
         elif event_type == "mandate_refused":
             self.trust[debtor_id] = trust.update_refusal(current, now)
         else:
@@ -498,6 +542,33 @@ class Ledger:
             return self._decide_money_action(entity, now)
 
         if state == "LINKED":
+            debit_reason = self.debit_failure_reason.get(entity.entity_id)
+            if debit_reason in ("insufficient_funds", "amount_exceeds_limit"):
+                # Timing/sizing failure, retry exhausted: re-present at a
+                # trust-derived SHRUNK amount rather than repeating the exact
+                # amount that already failed twice. Only the fallback LINK
+                # shrinks — `mandate_offer`/`mandate_execute` amounts stay
+                # locked to the ledger's invoice amount everywhere else
+                # (CLAUDE.md law 2, `check_bounds()`'s
+                # `mandate_amount_matches_ledger` is untouched).
+                debtor_trust = self.current_trust(self._debtor_id(entity.entity_id), now)
+                shrunk = trust.derive_shrunk_tranche_inr(debtor_trust, entity.invoice_amount_inr)
+                return self._try_action(
+                    entity, "link",
+                    {"amount_inr": shrunk, "instrument": "shrunk_tranche",
+                     "original_amount_inr": entity.invoice_amount_inr},
+                    f"debit failure ({debit_reason}): retry exhausted, re-presenting a trust-derived "
+                    f"partial ask (Rs.{shrunk:,} of Rs.{entity.invoice_amount_inr:,}) rather than "
+                    f"repeating the amount that already failed",
+                    now,
+                )
+            if debit_reason == "account_closed_frozen":
+                return self._try_action(
+                    entity, "link", {"amount_inr": entity.invoice_amount_inr},
+                    "debit failure (account_closed_frozen): the mandate rail is dead, switching "
+                    "instrument to a payment link at the full amount, no retry",
+                    now,
+                )
             cause = self.cart_cause.get(entity.entity_id)
             if cause is not None and not entity.mandate_refused:
                 # Scene 2: friction/price_shock/comparison/unknown route

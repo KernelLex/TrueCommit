@@ -267,13 +267,13 @@ def run_arm_c(seed: int, mandate_table_override: dict | None = None) -> dict:
         "bound_violations": len(world.bound_violations()),
         "scope_note": (
             "This figure is invoices only (per this report's scope), and will not match the "
-            "previously-published Rs.23,36,494 whole-world figure in TRACK_BAR.md/BUILD_QUALITY.md - "
+            "previously-published Rs.23,55,494 whole-world figure in TRACK_BAR.md/BUILD_QUALITY.md - "
             "that figure additionally includes Scene 2/cart mechanics out of scope for this report: "
             "the 2 Tier-0 reserve-cart recoveries (Rs.1,899 + Rs.5,250 = Rs.7,149) and, since "
             "2026-08-29, the 2 non-reserve carts that recover through a matched instrument (master "
             "doc §3.3: C-05's scheduled mandate + C-07's delivery-secured mandate, Rs.2,499 + "
             "Rs.2,499 = Rs.4,998). Reconciled exactly: "
-            "Rs.23,36,494 - Rs.7,149 - Rs.4,998 = Rs.23,24,347."
+            "Rs.23,55,494 - Rs.7,149 - Rs.4,998 = Rs.23,43,347."
         ),
     }
 
