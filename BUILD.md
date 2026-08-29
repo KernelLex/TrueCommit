@@ -80,19 +80,14 @@ Accept when:
   delivery flag + thread-so-far → output = cause JSON
 - Prompt: role + 5 causes defined + 6 few-shot examples + "output JSON only"
 - `eval/triage_eval.py` → accuracy vs ground truth
-Accept when: [ ] triage accuracy ≥ 90% (causes are easier than levels; below
-90% = fix prompt, not model)
+Accept when: [x] triage accuracy ≥ 90% — **scoped to threaded invoices by lead ruling** (tracking/DECISIONS.md): heuristic 91.7% PASS on the 24 threaded invoices / 71.7% on all 60 (no-thread cases sit under the proven information ceiling for every provider, not a classifier failure). See tracking/BUILD_QUALITY.md row for the qwen2.5:7b/3b numbers too.
 
 ### DAY 4 — Promise Extractor (perception/extractor.py) ⚠ LOAD-BEARING WALL
 - Claude call per inbound message with thread context → Extraction JSON
 - Prompt: L1–L5 definitions with 8 few-shots INCLUDING Hinglish + contradiction
 - Rule in prompt: "If date or amount is not explicit, do NOT invent — lower level"
 - `eval/extraction_eval.py` → per-level precision/recall table → saved to metrics/
-Accept when: [ ] level accuracy ≥ 85% on held-out labeled set
-If below: iterate prompt (more few-shots for confused pair, tighten definitions).
-Budget: max 1 extra half-day. Still failing → REDUCE ladder to 4 levels
-(merge L2/L4) and re-eval. Document the decision in BUILD_LOG.md — that's a
-failure-recovery story, not a shame.
+Accept when: [x] level accuracy ≥ 85% — **PASS on both providers measured**: heuristic 97.7% (in-sample caveat), qwen2.5:7b 88.6% (was 77.3% FAIL before the reference-date fix + prompt iteration — see tracking/BUILD_LOG.md). Ladder stayed at 5 levels; the 4-level fallback was not needed and not taken.
 
 ### DAY 5 — Judgment Layer (ZERO LLM)
 - `judgment/ledger.py`: promise lifecycle + status transitions
@@ -117,9 +112,8 @@ Accept when:
   1-line Claude summary → JSON + rendered card
 - Sentinel v1: retry ×3 w/ backoff, dead-letter queue table, link-open timer
 Accept when:
-- [ ] real test-mode Payment Link URL appears in audit trail for a demo invoice
-- [ ] killing the network mid-run → actions land in dead-letter, nothing lost,
-      resume works
+- [x] real test-mode Payment Link URL appears in audit trail for a demo invoice — `PK_REAL_RAZORPAY=1` + `WorldRunner().advance(3)` put a live TEST-mode link in the ledger's audit trail (`simulated: false`), plus a real mandate registration link. Opt-in and rate-limited: default = zero network calls.
+- [x] killing the network mid-run → actions land in dead-letter, nothing lost, resume works — closed 2026-08-29 (tracking/BUILD_LOG.md). A genuine `httpx.TransportError` (not just an HTTP-status rejection) now retries/backs-off/dead-letters via `RazorpayClient._send()`; the circuit breaker (`Sentinel.should_pause_outbound()`) is wired into `WorldRunner._payment_instrument()` and "resumes on recovery" once a real call succeeds again.
 
 ### DAY 7 — Dashboard + Auditor + FREEZE
 - Screens per master doc §4.3: Funnel / Entity timeline / Trust curves /
@@ -129,9 +123,9 @@ Accept when:
   quarantine flag (<85% → money actions to review queue)
 - Generate 1 Hinglish TTS voice note MP3, embed in stage-4 timeline entry
 Accept when:
-- [ ] cold start → `make run` → browser shows funnel with real data in <60s
-- [ ] pressing Advance-Day visibly moves money/promises/trust on screen
-- [ ] FEATURE FREEZE → tag `v1.0-freeze` in git
+- [x] cold start → browser shows funnel with real data in <60s — genuinely re-verified 2026-08-27 from a fresh `git clone` (`setup.ps1`/`setup.sh` then `run.ps1`/`run.sh` — this project's two-command scripts, not a literal `make run`; no `make` on a stock Windows judge machine, so cross-platform scripts were the honest substitute). 564/564 tests passed in that clean clone, API served `/docs`, dashboard served its root, both 200.
+- [x] pressing Advance-Day visibly moves money/promises/trust on screen — `dashboard/src/App.jsx`'s "Advance 1 Day ▶" button calls the real `POST /advance`, which drives the actual pipeline and returns `funnel_summary` + a per-day `stories` payload; `FunnelScreen.jsx`/`DayStoryScreen.jsx`/`TrustCurvesScreen.jsx` render it (screens built in packet P10 — this checkbox was stale from before that packet landed). Verified at the data level 2026-08-29 (`POST /advance {"days":3}` moved `recovered_inr` 0 → 7,149 via the two Tier-0 reserve carts, states genuinely changed) and via the dashboard's own dev proxy; the rendered page itself was not visually confirmed in a browser this session (no screenshot/browser tool available).
+- [ ] FEATURE FREEZE → tag `v1.0-freeze` in git — date-gated for Sep 1 per the user's own explicit instruction, not a work item to do early.
 
 ### DAY 8 — Metrics lock
 - `eval/run_arms.py`: Arm A silence / Arm B generic 3-day reminder /
@@ -139,13 +133,13 @@ Accept when:
 - Compute: DSO, %recovered, ₹recovered, touches/recovery (Tier-0 = 0 row),
   false-escalation rate, cost per ₹ (meter LLM tokens + message count)
 - Fill "measured vs simulated" table (master doc §4.5) with real numbers
-Accept when: [ ] re-running arms reproduces identical numbers
+Accept when: [x] re-running arms reproduces identical numbers — done 2026-08-27, `eval/run_arms.py` + `tests/test_run_arms.py` (10 tests, byte-identical at seed 42). Includes the mandate-acceptance sensitivity band (10%–60%) BUILD.md's original ask didn't name but the actual thesis needed — see tracking/TRACK_BAR.md §1.
 
 ### DAY 9 — Video + README
 - Record per master doc Part 5 script. Screen-record dashboard, voiceover after.
 - README: problem (2 stats) → 30s gif → metrics tables → architecture diagram →
   what's-real-vs-simulated → limitations → run instructions (2 commands)
-Accept when: [ ] a friend who knows nothing about this can run it from README alone
+Accept when: [x] a friend who knows nothing about this can run it from README alone — README.md written 2026-08-27, quick start pointing at the genuinely-verified setup/run scripts, the Tier1/Tier2 honesty split, and the AFA segmentation section. **Not yet done, still Day-9 work:** the fuller outline this section's own "Build:" list asks for — 30s gif, metrics tables, architecture diagram, what's-real-vs-simulated table, limitations section. The cold-start path is real and tested; the submission-polish content around it is not written yet.
 
 ### DAY 10 — Buffer + submit
 - Repo cleanup, .env.example check (NO real keys committed — grep for rzp_test/sk-ant)
