@@ -139,7 +139,7 @@ Accept when: [x] re-running arms reproduces identical numbers — done 2026-08-2
 - Record per master doc Part 5 script. Screen-record dashboard, voiceover after.
 - README: problem (2 stats) → 30s gif → metrics tables → architecture diagram →
   what's-real-vs-simulated → limitations → run instructions (2 commands)
-Accept when: [x] a friend who knows nothing about this can run it from README alone — README.md written 2026-08-27, quick start pointing at the genuinely-verified setup/run scripts, the Tier1/Tier2 honesty split, and the AFA segmentation section. **Not yet done, still Day-9 work:** the fuller outline this section's own "Build:" list asks for — 30s gif, metrics tables, architecture diagram, what's-real-vs-simulated table, limitations section. The cold-start path is real and tested; the submission-polish content around it is not written yet.
+Accept when: [x] a friend who knows nothing about this can run it from README alone — README.md written 2026-08-27, expanded 2026-08-29 with the fuller outline this section's own "Build:" list asks for: problem framing with two independently-verified stats, real Tier1/Tier2 metrics tables (pulled from `metrics.json`, not invented), an architecture diagram, a what's-real-vs-simulated table, and a limitations section. **Still not done:** the 30s gif (no screen-recording tool available this session) — everything else on the outline is written.
 
 ### DAY 10 — Buffer + submit
 - Repo cleanup, .env.example check (NO real keys committed — grep for rzp_test/sk-ant)
