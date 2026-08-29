@@ -101,13 +101,22 @@ Accept when:
 - [x] pytest: dispute event from ANY state → DISPUTED, no further outbound actions
 - [x] pytest: no path loops (walk 1000 random event sequences → all terminate
       in KEPT / CLEAN_LOSS / HUMAN_HANDOFF)
+- [x] **added 2026-08-29:** Scene 2's `cart_abandoned` event routes each of the
+      6 `CartCauseType` values to the matching instrument in this same
+      zero-LLM layer (master doc §3.3) — friction/price_shock/comparison/
+      unknown → `LINKED` (plain link, no mandate ever offered), timing/trust
+      → `PROMISED`→`MANDATED` (scheduled / delivery-secured mandate). All 12
+      carts reach a terminal state by day 45. See `tracking/BUILD_LOG.md`/
+      `DECISIONS.md` 2026-08-29.
 
 ### DAY 6 — Action Layer + Razorpay wiring
 - `action/razorpay_client.py`: test-mode create Payment Link, create Invoice,
   create order + mandate-offer object, execute/revoke (mandate lifecycle events
   simulated where test mode doesn't support them — LABEL which in code comments)
 - `action/messenger.py`: message queue with channel + rail label
-  (wa_native_payment | mandate_link | plain_link) per §8.5
+  (wa_native_payment | mandate_link | delivery_secured_mandate | plain_link) per §8.5
+  — the 4th rail (delivery-secured mandate) added 2026-08-29 with Scene 2's
+  cause → instrument layer, see Day 1-2's cart-cause note below
 - `action/evidence.py`: dispute packet = invoice + thread + delivery flag +
   1-line Claude summary → JSON + rendered card
 - Sentinel v1: retry ×3 w/ backoff, dead-letter queue table, link-open timer

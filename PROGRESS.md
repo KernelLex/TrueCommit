@@ -7,6 +7,32 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 
 ---
 
+## 🚦 STATUS SNAPSHOT — what's done, what's ASAP (2026-08-29, 3 days to freeze)
+
+**Engineering-wise, the pre-agreed cut order is fully built.** CLAUDE.md's own scope-cut sequence — Reserve failover beat → Scene 2 entirely → Auditor → TTS voice — is now **4 of 4 done** (Scene 2 was the last one, closed today). Track A (IVR) was also built and live-tested beyond the original day-by-day plan. There is currently **no unbuilt feature queued** against BUILD.md/master doc/CLAUDE.md's own scope — see `tracking/DECISIONS.md`'s cut-order note for the full list. This is worth saying plainly because it changes what "ASAP" means from here: the remaining work is Day 9–10 (video/README/submission) and demo prep, not more code.
+
+**✅ Done (all tested, tracked, pushed):**
+- Full Scene 1 pipeline: triage → extraction (85%/90% accuracy gates cleared on 2 providers) → trust → state machine (all 8 bounds) → mandate/link conversion → escalation ladder → human handoff/dispute
+- Scene 2: Tier-0 reserve failover (0-touch) **and**, as of today, the cause → instrument layer for the other 10 carts (friction/price_shock/comparison/unknown → link, timing → scheduled mandate, trust → delivery-secured mandate with the revoke branch shown)
+- Reliability mesh: Sentinel (retry/backoff/dead-letter/circuit breaker, wired end to end including a genuine network-kill) + Auditor (accuracy self-monitoring, quarantine gate)
+- RBI E-Mandate Framework compliance: pre-debit (T-1) and post-debit notices, both live in every mandate execution
+- Real-world integrations, opt-in and rate-limited: Razorpay TEST mode (payment links, mandate registration, full create→execute→revoke lifecycle, human-verified), Twilio voice/IVR + WhatsApp, Telegram real dispatch
+- Dashboard: Funnel, Entity Timeline (mandate lifecycle stepper, guardrail panel), Trust Curves, Human Review queue, System Health (Sentinel + Auditor widgets)
+- 3-arm measured-vs-simulated comparison (`eval/run_arms.py` → `metrics.json`), mandate-acceptance sensitivity band, reproducibility locked at seed 42
+- **642/642 tests passing**, cold start verified from a fresh clone in 2 commands, no secrets in repo (grepped clean)
+- README expanded to BUILD.md's own Day-9 outline (verified stats, metrics tables, architecture diagram, real-vs-simulated table, limitations section)
+
+**⏭ ASAP, in order:**
+1. **The Day-9 30-second gif/screen-recording is still missing** — the one item on BUILD.md's own Day-9 outline not done, because no screen-recording tool has been available in this environment. This needs the user (or a machine with one) to record the dashboard time-warp — I can prep the exact sequence to record (which buttons, which screens, in what order) but cannot capture it myself.
+2. **`v1.0-freeze` git tag** — correctly still unchecked, date-gated for Sep 1 (BUILD.md Day 7), not a code task, just don't forget to actually tag it that day.
+3. **Day 10 submit checklist** — final repo cleanup pass, one more `grep -r "rzp_\|sk-ant"` sweep, package the video + architecture doc + track-selection writeup, submit by Sep 5.
+4. **Demo-day rehearsal** (BUILD.md §6) — none of this is started: a pre-recorded backup video for every live segment, the 5 "money-shot" beats rehearsed live (L1 extraction, mandate refusal + trust dip, dispute → evidence packet, Tier-0 reserve heal, the 3-arm table), and answers rehearsed for the 4 panel questions BUILD.md names. This is presentation prep, best done by the user with the app in front of them, not something to pre-build in code.
+5. **Track B (WhatsApp dual-path)** — explicitly not selected at the Track A/B gate, stays out of scope unless the user picks it up. Nothing pending here unless asked.
+
+**Nothing else is silently outstanding.** If a new gap is found (the way Scene 2's was), it'll be flagged here and in `tracking/DECISIONS.md` before being built, per CLAUDE.md §6's reminder-of-cut-order-first rule.
+
+---
+
 ## Track A / B gate (2026-08-27) — resolved: user picked Track A
 
 After the 7-step corrections+bar pass (README, three-arm runner, cold start, RBI notices — all done, tested, pushed), the user was asked to pick ONE of Track A (IVR) or Track B (WhatsApp dual-path) for the Aug 31–Sep 1 window, not both. **Track A was picked.** Track A is now built (see "DONE" below); Track B stays exactly where it was left — researched and planned, zero code — and is out of scope unless separately picked later.
@@ -128,10 +154,11 @@ Two real bugs caught mid-build by the new tests, not shipped: a reserve cart's c
 
 **Tests: 271/271** · Every packet lead-reviewed against the 8 laws; every headline number independently reproduced before merge.
 
-## ⏭ NEXT (Day 7 → 10)
-- **Day 7 batch**: Auditor (10% verification sampling on Ollama + rolling accuracy + <85% quarantine → review queue) · instrument-over-nudge touch-budget priority (lead-ruled: master doc's own recovery hierarchy applied to the scarce per-debtor budget, before/after reported) · Hinglish TTS voice note · dashboard funnel-movement polish + cold-start 2-command path → **tag `v1.0-freeze`** (Sep 1)
-- **Day 8**: three-arm runner (silence / generic reminder / full system, same seed) → metrics.json, DSO/₹recovered/touches-per-recovery (Tier-0 = 0 row)/false-escalation/cost-per-₹, reproducibility-locked
-- **Day 9**: video (master doc Part 5 script) + README · **Day 10**: cleanup + submit
+## ⏭ NEXT (Day 7 → 10) — SUPERSEDED, kept for history only
+**All of Day 7/8/9's engineering items below shipped since this was written** (Auditor, three-arm runner, README, dashboard polish, cold start, plus Scene 2 and Track A which weren't even anticipated here). **See the 🚦 STATUS SNAPSHOT at the top of this file for what's actually next as of 2026-08-29.**
+- ~~**Day 7 batch**: Auditor (10% verification sampling on Ollama + rolling accuracy + <85% quarantine → review queue) · instrument-over-nudge touch-budget priority (lead-ruled: master doc's own recovery hierarchy applied to the scarce per-debtor budget, before/after reported) · Hinglish TTS voice note · dashboard funnel-movement polish + cold-start 2-command path → **tag `v1.0-freeze`** (Sep 1)~~
+- ~~**Day 8**: three-arm runner (silence / generic reminder / full system, same seed) → metrics.json, DSO/₹recovered/touches-per-recovery (Tier-0 = 0 row)/false-escalation/cost-per-₹, reproducibility-locked~~
+- ~~**Day 9**: video (master doc Part 5 script) + README~~ · **Day 10**: cleanup + submit — still genuinely pending, see snapshot above
 
 ## ✅ P9 MERGED (2026-08-26) — human-in-the-loop is real
 
