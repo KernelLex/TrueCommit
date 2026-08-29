@@ -420,6 +420,45 @@ def test_razorpay_error_raised_on_400():
     assert "minimum amount" in excinfo.value.description
 
 
+@pytest.mark.parametrize("transport_exc", [
+    httpx.ConnectError("Connection refused"),
+    httpx.ConnectTimeout("timed out"),
+    httpx.ReadTimeout("timed out mid-response"),
+    httpx.NetworkError("network is unreachable"),
+])
+def test_a_genuine_network_failure_is_wrapped_as_a_razorpay_error_not_left_to_crash(transport_exc):
+    """The gap BUILD_QUALITY.md's own acceptance table flagged as unproven:
+    every prior Sentinel retry/dead-letter test exercised an HTTP-status
+    rejection (a real 400), never a genuine mid-request network kill. A raw
+    `httpx.TransportError` (DNS failure, connection reset, dropped
+    connection — this parametrization covers several concrete subclasses)
+    must never propagate past this client uncaught: `WorldRunner.
+    _real_razorpay_call`'s retry loop only catches `RazorpayError`, so an
+    unwrapped `httpx.TransportError` would crash the entire simulated day
+    instead of being retried and dead-lettered like any other failure."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise transport_exc
+
+    client = _mock_client(handler)
+    with pytest.raises(RazorpayError) as excinfo:
+        client.create_payment_link(amount_inr=40000, description="x", customer={})
+    assert excinfo.value.status_code is None
+    assert "network error" in str(excinfo.value).lower()
+
+
+def test_an_http_status_error_is_unaffected_by_the_network_error_wrapping():
+    """The new wrapping in `_send()` must not swallow or reshape an ordinary
+    HTTP-status rejection — it only catches `httpx.TransportError`, which a
+    real (if unwelcome) 4xx/5xx response is not."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(500, {"error": {"description": "Internal Server Error"}})
+
+    client = _mock_client(handler)
+    with pytest.raises(RazorpayError) as excinfo:
+        client.create_payment_link(amount_inr=40000, description="x", customer={})
+    assert excinfo.value.status_code == 500
+
+
 # -- module-level convenience functions delegate to a default client -----
 
 

@@ -160,16 +160,35 @@ class RazorpayClient:
     # -- transport --------------------------------------------------------
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        resp = self._client.post(path, json=payload)
+        resp = self._send(lambda: self._client.post(path, json=payload))
         return self._handle(resp)
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        resp = self._client.get(path, params=params)
+        resp = self._send(lambda: self._client.get(path, params=params))
         return self._handle(resp)
 
     def _delete(self, path: str) -> dict[str, Any]:
-        resp = self._client.delete(path)
+        resp = self._send(lambda: self._client.delete(path))
         return self._handle(resp)
+
+    @staticmethod
+    def _send(do_request) -> httpx.Response:
+        """A genuine network interruption (DNS failure, connection reset, a
+        dropped mid-run connection — `httpx.TransportError`, the same
+        exception class `engine/perception/providers/ollama.py` already
+        catches for its own "could not reach Ollama" case) is a REAL failure
+        this client must survive, not let propagate as an unhandled
+        exception and crash the caller. Wrapped as a `RazorpayError` here so
+        `engine/action/sentinel.py`'s existing retry/backoff/dead-letter
+        machinery — already proven against a genuine live 400 API rejection
+        (tracking/BUILD_LOG.md, "mandate rail pivot") — handles a mid-run
+        network kill on exactly the same terms, rather than needing a second
+        mechanism. Found live 2026-08-29: this path had never been
+        exercised against anything but an HTTP-status-level rejection."""
+        try:
+            return do_request()
+        except httpx.TransportError as exc:
+            raise RazorpayError(f"network error reaching Razorpay: {exc}", status_code=None, description=str(exc)) from exc
 
     @staticmethod
     def _handle(resp: httpx.Response) -> dict[str, Any]:

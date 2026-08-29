@@ -1324,11 +1324,33 @@ class WorldRunner:
 
     def _payment_instrument(self, action: Action, day: int) -> dict:
         """Returns the instrument detail recorded in the audit entry. Real
-        sandbox call only when opted in AND this is the first of its kind."""
+        sandbox call only when opted in AND this is the first of its kind.
+
+        The circuit breaker is checked BEFORE the once-per-run budget is
+        spent, deliberately: master doc §7.2 promises sustained API failure
+        "pauses all outbound actions... resumes on recovery," and a paused
+        attempt is not a spent one — the one real link/mandate this run is
+        allowed still goes out once `Sentinel.should_pause_outbound()`
+        clears (a later real attempt succeeding resets `circuit_open` to
+        False automatically, `Sentinel.record_send_attempt`'s own success
+        branch — "resume on recovery" was already built, just never read by
+        anything until now). Found live 2026-08-29 alongside the network-
+        error wrapping in `razorpay_client.py`: this call site is the ONLY
+        one in the whole codebase that ever reports a Razorpay failure to
+        the Sentinel at all, so it is also the only one whose pause has any
+        real trigger condition."""
         kind = action.kind
         amount = action.params.get("amount_inr")  # ledger's number, never perception's
         if not self.real_razorpay or not isinstance(amount, int):
             return {"simulated": True, "short_url": self._sim_url(action)}
+        if self.sentinel.should_pause_outbound():
+            self._audit(
+                action.entity_id, "sentinel",
+                "circuit breaker open (sustained Razorpay failures) — real call paused, falling back to simulated rail",
+                {"action_id": action.id, "kind": kind}, day,
+            )
+            return {"simulated": True, "short_url": self._sim_url(action),
+                    "reason": "circuit breaker open — sustained Razorpay failures, real calls paused"}
         if kind == "link" and self._real_link_used:
             return {"simulated": True, "short_url": self._sim_url(action), "reason": "real-call budget for links already used this run"}
         if kind == "mandate_offer" and self._real_mandate_used:

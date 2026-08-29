@@ -867,3 +867,96 @@ def test_a_failing_razorpay_call_retries_then_dead_letters_then_falls_back(monke
     # the world kept moving on the simulated rail
     assert runner.funnel_summary()["messages_sent"] > 0
     assert runner.funnel_summary()["recovered_inr"] > 0
+
+
+def test_a_genuine_network_kill_mid_run_is_dead_lettered_not_left_to_crash(monkeypatch):
+    """The other half of BUILD_QUALITY.md's row 56: every prior Sentinel
+    retry/dead-letter proof (including the test above) used an HTTP-status
+    rejection. This raises the SAME shape of error a genuine dropped
+    connection mid-run now produces — `RazorpayClient._send`
+    (tests/test_razorpay_client.py proves that conversion in isolation, a
+    raw `httpx.TransportError` in, this text out) — and proves the RUNNER's
+    own retry/backoff/dead-letter path treats it identically to an
+    HTTP-status rejection, so `WorldRunner.advance()` survives it rather
+    than crashing on an unhandled network exception."""
+
+    def network_dies(*args, **kwargs):
+        raise razorpay_client.RazorpayError("network error reaching Razorpay: Connection refused", status_code=None)
+
+    monkeypatch.setattr(razorpay_client, "create_payment_link", network_dies)
+    monkeypatch.setattr(razorpay_client, "create_mandate_registration_link", network_dies)
+
+    runner = WorldRunner(real_razorpay=True, real_tts=False)
+    runner.advance(10)  # must not raise
+
+    assert len(runner.sentinel.dead_letter) > 0
+    network_failures = [
+        e for e in runner.ledger.audit
+        if e.layer == "sentinel" and "network error" in e.detail.get("error", "").lower()
+    ]
+    assert network_failures, "the network-kill error text must reach the audit trail, not be swallowed"
+    assert runner.funnel_summary()["messages_sent"] > 0
+
+
+def test_circuit_breaker_pauses_real_razorpay_calls_and_preserves_the_budget(monkeypatch):
+    """The wiring gap BUILD_QUALITY.md row 56 flagged: `Sentinel.
+    should_pause_outbound()` existed, was unit-tested in isolation, and had
+    ZERO call sites in the runner — master doc §7.2's "pause all outbound
+    actions" promise had no effect on anything. `_payment_instrument()` now
+    checks it before spending the once-per-run real-call budget, so a
+    circuit that trips mid-run does not burn the one real link/mandate
+    attempt a later recovery would need."""
+    from engine.schemas import Action
+
+    runner = WorldRunner(real_razorpay=True, real_tts=False)
+    action = Action(
+        id="A-TEST", entity_id="INV-001", kind="link",
+        params={"amount_inr": 40000}, reason="test", bounds_checked=True, ts=runner.now(),
+    )
+
+    runner.sentinel.consecutive_failures = runner.sentinel.circuit_breaker_threshold
+    runner.sentinel.circuit_open = True
+
+    audit_before = len(runner.ledger.audit)
+    detail = runner._payment_instrument(action, 0)
+
+    assert detail["simulated"] is True
+    assert "circuit breaker" in detail["reason"]
+    assert runner._real_link_used is False, "a paused attempt must not spend the once-per-run budget"
+    pause_entries = [e for e in runner.ledger.audit[audit_before:] if "circuit breaker" in e.summary]
+    assert len(pause_entries) == 1
+
+
+def test_circuit_breaker_resume_on_recovery_lets_the_real_call_through_again(monkeypatch):
+    """Master doc §7.2's other half: "resume on recovery." Already true at
+    the Sentinel level (`record_send_attempt`'s success branch resets
+    `circuit_open`) — this proves the RUNNER actually observes that reset,
+    now that `_payment_instrument` reads the flag at all."""
+    from engine.schemas import Action
+
+    calls = []
+    monkeypatch.setattr(
+        razorpay_client, "create_payment_link",
+        lambda *a, **k: calls.append(1) or {"id": "plink_TEST", "short_url": "https://rzp.io/rzp/TEST"},
+    )
+
+    runner = WorldRunner(real_razorpay=True, real_tts=False)
+    action = Action(
+        id="A-TEST", entity_id="INV-001", kind="link",
+        params={"amount_inr": 40000}, reason="test", bounds_checked=True, ts=runner.now(),
+    )
+    runner.sentinel.consecutive_failures = runner.sentinel.circuit_breaker_threshold
+    runner.sentinel.circuit_open = True
+    assert runner._payment_instrument(action, 0)["simulated"] is True
+    assert runner._real_link_used is False
+    assert calls == []
+
+    # recovery: a real attempt succeeding resets the breaker, exactly like
+    # a real API call recovering would
+    runner.sentinel.record_send_attempt("A-OTHER", "INV-001", "link", True, runner.now())
+    assert runner.sentinel.should_pause_outbound() is False
+
+    detail = runner._payment_instrument(action, 0)
+    assert detail["simulated"] is False
+    assert calls == [1], "with the circuit closed, the real-call path is reached again"
+    assert runner._real_link_used is True
