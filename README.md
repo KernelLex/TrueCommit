@@ -24,7 +24,7 @@ powershell -ExecutionPolicy Bypass -File run.ps1
 
 `setup` creates a Python venv, installs dependencies, and installs the dashboard's `node_modules`. `run` starts the API and the dashboard together. The app runs fully offline with no API keys — copy `.env.example` to `.env` and add real keys only for the live-Razorpay / real-channel demos.
 
-Run the test suite (637 tests as of this writing, fully offline):
+Run the test suite (642 tests as of this writing, fully offline):
 ```
 .venv/Scripts/python.exe -m pytest tests/   # Windows
 .venv/bin/python -m pytest tests/           # Mac/Linux
@@ -41,7 +41,7 @@ This project measures what it can and labels what it can't (CLAUDE.md's design l
 | Promise extraction accuracy (L1–L5 vs. hand labels) | **97.7%** heuristic (in-sample) · **88.6%** qwen2.5:7b | ≥85% | The heuristic number is in-sample (rules authored with the labels visible) — the honest ceiling, not a held-out estimate. The LLM number is the one that means something as a generalization claim. |
 | Root-cause triage accuracy | **91.7%** on the 24 invoices with a message thread · 71.7% across all 60 | ≥90% | Gated on threaded invoices by explicit ruling (`tracking/DECISIONS.md`) — a triage call with zero messages to read is an information-ceiling problem, not a classifier failure, and every provider tested (heuristic and two Ollama model sizes) hits the same wall on those cases. |
 | Reproducibility | Byte-identical across independent runs at seed 42 | diff = empty | Dataset generator, simulator, integration runner, and the 3-arm runner all re-verified — see `tracking/BUILD_QUALITY.md`. |
-| Test suite | **637 tests, offline by default** | — | `pytest tests/` — no network call happens unless a `PK_REAL_*` flag is explicitly opted into, with one deliberate exception: a live smoke test against a local Ollama server (skips cleanly if Ollama isn't running). |
+| Test suite | **642 tests, offline by default** | — | `pytest tests/` — no network call happens unless a `PK_REAL_*` flag is explicitly opted into, with one deliberate exception: a live smoke test against a local Ollama server (skips cleanly if Ollama isn't running). |
 
 ### Tier 2 — simulated (frozen personas, never tuned to flatter the result)
 
@@ -135,7 +135,7 @@ We could not find primary RBI text resolving this either way as of this writing.
 - **UPI Autopay execution is gated on this Razorpay TEST account**, not a code limitation — netbanking eMandate is this project's primary, fully-verified rail instead.
 - **Whether RBI's ₹15,000 AFA threshold extends to NACH/netbanking eMandate is genuinely ambiguous** in publicly available sources — see the AFA section above. This project designed for the stricter reading rather than assuming the gap in its own favor.
 - **The Auditor's default 2nd-pass verification is a self-agreement check when heuristic is the active perception provider** (this project's own default) — it becomes a meaningful independent cross-check only when a real LLM provider is active. Stated in the code and in `tracking/AI_JUDGMENT.md`, not hidden.
-- **Scene 2 (checkout drop-off) is the breadth proof, not the deep build** — Scene 1 (B2B receivables) is where most of the engineering and testing depth lives, by the project's own pre-agreed scope-cut order.
+- **Scene 2 (checkout drop-off) is the breadth proof, not the deep build** — Scene 1 (B2B receivables) is where most of the engineering and testing depth lives, by the project's own pre-agreed scope-cut order. The cause → instrument judgment layer (friction/price-shock/comparison/unknown → payment link, timing → scheduled mandate, trust → delivery-secured mandate with the revoke branch) is built and tested against the real 12-cart dataset, but carts carry no persona model the way Scene 1 debtors do — outcomes for the mandate-bearing causes are scripted deterministically per master doc §3.3 rather than drawn from a behavioral simulation, and the plain-link causes are closed out by the same idle-sweep/timeout machinery Scene 1 uses rather than a modeled conversion rate.
 - **Tier 2 recovery numbers are simulated against frozen personas**, never real debtor behavior — see the honesty split above. The mandate-acceptance rate the whole thesis is most sensitive to has no real-world data behind it, which is exactly why it's reported as a band, not a point estimate.
 
 ## More detail

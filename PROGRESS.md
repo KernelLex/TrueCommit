@@ -1,5 +1,5 @@
 # PROGRESS.md — Promise Keeper build status
-### Last updated: 2026-08-28 (Track A / IVR built + live-tested; Auditor built — the last item before CLAUDE.md's own cut line; Track B / WhatsApp remains not started, not currently selected) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
+### Last updated: 2026-08-29 (Scene 2's cause → instrument follow-through built — the pre-agreed cut order's item #2, built per the user's explicit "build all the features" request; Track A / IVR + the Auditor already built 2026-08-28; Track B / WhatsApp remains not started, not currently selected) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
 
 > **Handing over between Claude sessions? Read `HANDOVER.md` first** — it carries the build mechanism (three-tier orchestration), the laws, the resume procedure, and the in-flight packet specs.
 
@@ -55,6 +55,23 @@ Confirmed for the user: deploying to a host like Render does **not** carry Ollam
 
 ### If Track B (WhatsApp) is ever picked up
 Needs a ContentSid lookup (Twilio Content API/console, not guessed) plus a decision on the honesty question flagged above (generic sandbox template wording vs. the real reminder text) before any code — nothing about that has changed since the pause.
+
+---
+
+## Continuing development (2026-08-29) — Scene 2's cause → instrument follow-through
+
+User asked to continue and build all remaining features. Rather than guess what was left, audited by grepping for genuinely-unbuilt mechanisms the same way the network-kill/circuit-breaker gap was found earlier: `grep -n "cart_abandoned\|CartCauseType\|friction\|price_shock" engine/judgment/ledger.py engine/judgment/state_machine.py` returned zero matches. `WorldRunner._cart_beats()` triaged every cart's cause and then did nothing further for the 10 non-reserve carts — master doc §3.3's "cause triage → matching instrument" promise held for the 2 Tier-0 reserve carts only. **This is explicitly the pre-agreed cut-order item #2** (Reserve failover → **Scene 2** → Auditor → TTS voice, all four now built) — flagged to the user before building, then built since the request to build everything stood.
+
+### Scene 2 cause → instrument routing — ✅ DONE, 2026-08-29
+Read master doc §3.3 (full Scene 2 flow) and §8.5 (the WhatsApp rail-labeling scope) before writing any code, per CLAUDE.md's file-authority order. Built the mapping as fixed code, never a model decision (law 1): `state_machine.transition()` routes `cart_abandoned` to `PROMISED` (timing/trust — a capturable commitment) or straight to `LINKED` (friction/price_shock/comparison/unknown — "NO discount, NO mandate"), explicitly excluding `reserve_active` carts so Tier-0's pre-check still runs first. `Ledger._decide_money_action`/`_decide_action` pick the actual instrument from the cause: `trust` → a new `delivery_secured_mandate` rail ("pay nothing today... cancelled instantly if returned"), `timing` → the existing `scheduled_mandate`/`mandate_link` rail, everything else → a plain link, no mandate ever considered. `WorldRunner._resolve_cart_mandate` scripts the two mandate-bearing causes to a real, deterministic outcome (no persona exists for cart customers, so nothing here draws on the shared RNG stream): C-05 (timing) executes and recovers; of the dataset's 2 `trust` carts, C-07 shows the happy path (delivery confirmed day+4 → mandate executes) and C-08 shows the revoke branch (`delivery_rejected` → `CLEAN_LOSS`, a transition that already existed in `state_machine.py` with zero callers until now) — the master doc explicitly wants both branches demonstrated. `_sweep_idle` now covers non-reserve carts too, so a friction/price-shock/comparison/unknown cart whose link is never opened reaches `HUMAN_HANDOFF` rather than sitting open forever (law 5, extended to Scene 2).
+
+Two real bugs caught mid-build by the new tests, not shipped: a reserve cart's cause (`friction`) was routing it to `LINKED` and dispatching a real link before Tier-0's pre-check ever got a chance to run (fixed by excluding `reserve_active` from the new transition); and the scripted mandate confirmations weren't marking their own instrument "opened," so the Sentinel's 48h timer soft-refused a mandate this method had just confirmed directly (fixed by appending a synthetic approval reply and marking it opened, mirroring `_offer_instrument`'s existing `_inbound()` call for Scene 1). Full story: `tracking/BUILD_LOG.md`/`DECISIONS.md`, 2026-08-29.
+
+**Numbers that moved, measured not asserted:** whole-world `recovered_inr` ₹23,31,496 → ₹23,36,494 (+₹4,998 = the two now-recovering carts), `messages_sent` 111 → 124. Arm C's own invoice-only Tier-2 figure in `metrics.json`/README (₹23,24,347) is genuinely unchanged — Scene 2 was always out of that report's scope; only its `scope_note` reconciliation text changed. 5 new tests pin the cause → instrument mapping and both trust-cart branches against the real 12-cart dataset; 642/642 total, reproducibility re-verified byte-identical across two fresh runs.
+
+**Arbitrary modeling calls, logged rather than hidden** (`tracking/DECISIONS.md`): which of the 2 trust carts gets which branch (resolved by sorted cart id, not a coin flip), and leaving the plain-link causes' conversion entirely unmodeled (closed by the idle sweep/link-timeout instead of an invented conversion rate — no persona table exists for cart customers to draw one from honestly).
+
+**Not built, deliberately out of this pass's scope:** any dashboard-visible distinction for the new `delivery_secured_mandate` rail beyond what already renders generically (no screen currently special-cases rail values); a persona/behavior model for cart customers (Scene 2 stays lighter than Scene 1 by design, per the cut order).
 
 ---
 

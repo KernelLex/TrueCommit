@@ -222,6 +222,14 @@ class Ledger:
         self.paused: dict[str, bool] = {}
         """entity_id -> merchant kill-switch. True = no outbound action of any
         kind, from any path."""
+        self.cart_cause: dict[str, str] = {}
+        """entity_id -> the Scene-2 cause the perception layer inferred for
+        this cart (master doc §3.3). Read only by `_decide_money_action` /
+        `_decide_action`'s LINKED branch to pick the matching instrument and
+        its copy — the cause itself is an LLM/heuristic OUTPUT, but which
+        instrument a given cause maps to is fixed here, in code, never left
+        to the model (CLAUDE.md law 1)."""
+
         self.auditor_quarantined: bool = False
         """The Auditor's (engine/action/auditor.py, master doc §7.3) self-
         monitoring flag: when its rolling extraction-agreement rate falls
@@ -303,6 +311,9 @@ class Ledger:
 
         if event_type == "payment_failed" and self.reserve_active.get(entity_id):
             return self._tier0_recover(entity, entity_id, now)
+
+        if event_type == "cart_abandoned":
+            self.cart_cause[entity_id] = str(payload.get("cause", "unknown"))
 
         prev_state = entity.state
         new_state = state_machine.transition(entity, event_type, payload, now)
@@ -487,6 +498,21 @@ class Ledger:
             return self._decide_money_action(entity, now)
 
         if state == "LINKED":
+            cause = self.cart_cause.get(entity.entity_id)
+            if cause is not None and not entity.mandate_refused:
+                # Scene 2: friction/price_shock/comparison/unknown route
+                # straight to a link and never considered a mandate at all
+                # (see `mandate_refused` guard: a cart that DID have a
+                # mandate offered and refused falls through to the ordinary
+                # fallback copy below, same as Scene 1).
+                reason = {
+                    "friction": "friction cause: no discount, no mandate — instant alternate-method payment link (master doc §3.3)",
+                    "price_shock": "price-shock cause: threshold nudge, still no discount-by-default — payment link (master doc §3.3)",
+                }.get(cause, f"{cause} cause: right-tool payment link, no instrument overcommitment")
+                return self._try_action(
+                    entity, "link", {"amount_inr": entity.invoice_amount_inr, "instrument": "plain_link"},
+                    reason, now,
+                )
             return self._try_action(entity, "link", {"amount_inr": entity.invoice_amount_inr}, "fallback to payment link", now)
 
         if state == "AT_RISK":
@@ -536,8 +562,29 @@ class Ledger:
         real gate re-runs on the approve click.
         """
         amount = entity.invoice_amount_inr
+        cause = self.cart_cause.get(entity.entity_id)
+        if cause == "trust":
+            # Master doc §3.3's crown-jewel instrument: pay nothing today,
+            # debit only on delivery confirmation, cancelled instantly on a
+            # rejection (the revoke branch is `delivery_rejected`, wired in
+            # `WorldRunner._resolve_cart_delivery_rejected`).
+            mandate_params = {"amount_inr": amount, "instrument": "delivery_secured_mandate"}
+            mandate_reason = (
+                "trust-hesitant cart (first-time buyer / COD unavailable): delivery-secured mandate — "
+                "pay nothing today, debit only on delivery confirmation, cancelled instantly if returned "
+                "(master doc §3.3)"
+            )
+        elif cause == "timing":
+            mandate_params = {"amount_inr": amount, "instrument": "scheduled_mandate"}
+            mandate_reason = (
+                "timed-intent cart: scheduled mandate — approve now, debits on the stated date, "
+                "order ships same day (master doc §3.3)"
+            )
+        else:
+            mandate_params = {"amount_inr": amount}
+            mandate_reason = "L1+ promise, offering scheduled mandate"
         candidates: tuple[tuple[str, dict, str], ...] = (
-            ("mandate_offer", {"amount_inr": amount}, "L1+ promise, offering scheduled mandate"),
+            ("mandate_offer", mandate_params, mandate_reason),
             ("link", {"amount_inr": amount}, "mandate blocked, falling back to payment link"),
         )
         confidence = self.extraction_confidence.get(entity.entity_id)

@@ -80,10 +80,17 @@ def test_the_45_day_distribution_is_the_number_the_docs_quote(world: WorldRunner
     every one that goes on to execute successfully also gets a post-debit
     confirmation (queued against the real Event that recorded the success,
     since a first-attempt success needs no further Action of its own — see
-    `WorldRunner._resolve_mandate_execution`). Every OTHER figure on this
-    test is unchanged, which is the point — these notices are a pure side
-    channel (see engine/schemas.py's ActionKind docstring): no state, no
-    money, no touch cap, no promise moved because they exist.
+    `WorldRunner._resolve_mandate_execution`).
+
+    `recovered_inr` moved 2,331,496 -> 2,336,494 and `messages_sent` moved
+    111 -> 124 on 2026-08-29, when Scene 2's cause -> instrument follow-
+    through was built (master doc §3.3): the timing-cause cart (C-05,
+    Rs.2,499) and the happy-path trust-cause cart (C-07, Rs.2,499) now
+    actually recover — before this the non-reserve carts were triaged for
+    their cause and then abandoned with zero follow-through action, a real
+    gap (see tracking/BUILD_LOG.md 2026-08-29). This test's own `distribution`
+    assertion below is Scene-1-invoice-only (`active_invoice_ids`) and is
+    UNCHANGED by this — Scene 2 carts are a disjoint entity population.
     """
     states = _invoice_states(world)
     distribution: dict[str, int] = {}
@@ -93,15 +100,18 @@ def test_the_45_day_distribution_is_the_number_the_docs_quote(world: WorldRunner
     assert distribution == {"KEPT": 21, "HUMAN_HANDOFF": 27, "DISPUTED": 3}
 
     summary = world.funnel_summary()
-    assert summary["recovered_inr"] == 2_331_496
+    assert summary["recovered_inr"] == 2_336_494
     active_value = sum(
         world.ledger.entities[eid].invoice_amount_inr for eid in world.active_invoice_ids
     )
     assert active_value == 6_971_068
-    assert round(100 * summary["recovered_inr"] / active_value, 1) == 33.4
+    # `recovered_inr` also carries Scene-2 cart recoveries (a disjoint entity
+    # population, not part of `active_value`), so this ratio ticked up
+    # alongside the 2026-08-29 change above, from 33.4 to 33.5.
+    assert round(100 * summary["recovered_inr"] / active_value, 1) == 33.5
 
     assert summary["promises"] == {"broken": 14, "kept": 18, "pending": 6}
-    assert summary["messages_sent"] == 111
+    assert summary["messages_sent"] == 124
     assert summary["held_actions_total"] == 4
     assert summary["dead_letter"] == 0
     assert world.bound_violations() == []
@@ -139,6 +149,90 @@ def test_the_two_reserve_carts_recover_with_zero_touches(world: WorldRunner):
     assert world.funnel_summary()["tier0_zero_touch_recoveries"] == reserve_carts
 
 
+# ---------------------------------------------------------------------------
+# Scene 2: cause -> instrument follow-through (master doc §3.3, built 2026-08-29)
+#
+# Before this, `_cart_beats` triaged every cart's cause and then did nothing
+# further for the 10 non-reserve carts — the master doc's own "cause triage ->
+# matching instrument" promise held for zero of them. These tests pin the
+# actual cause -> instrument mapping against the real, fixed dataset (never a
+# synthetic cart), so a regression here means the judgment gap is back.
+# ---------------------------------------------------------------------------
+
+
+def test_every_cart_reaches_a_terminal_state(world: WorldRunner):
+    """CLAUDE.md law 5 for Scene 2, not just Scene 1: no silent deaths."""
+    for cart_id in world.carts:
+        entity = world.ledger.entities.get(cart_id)
+        assert entity is not None, f"{cart_id} never even entered the ledger"
+        assert entity.state in TERMINAL_STATES, f"{cart_id} still open at {entity.state} after {RUN_DAYS} days"
+
+
+def test_friction_and_price_shock_carts_get_a_plain_link_never_a_mandate(world: WorldRunner):
+    """Master doc §3.3: "friction path -> NO discount, NO mandate. ACTION:
+    instant alternate-method payment link." Same "no mandate" rule for
+    price-shock ("still no discount-by-default")."""
+    no_mandate_causes = {"friction", "price_shock", "comparison", "unknown"}
+    for cart_id, cause in world.cart_causes.items():
+        if world.carts[cart_id].reserve_active or cause.cause not in no_mandate_causes:
+            continue
+        kinds = {a.kind for a in world.actions if a.entity_id == cart_id}
+        assert "mandate_offer" not in kinds, f"{cart_id} ({cause.cause}) was offered a mandate — never allowed"
+        assert "link" in kinds, f"{cart_id} ({cause.cause}) got no payment link at all"
+
+
+def test_the_timing_cause_cart_gets_a_scheduled_mandate_that_executes(world: WorldRunner):
+    """Master doc §3.3: "approved -> executes on the 1st -> order auto-placed
+    -> recovered." C-05 is the dataset's one `timing`-cause cart."""
+    timing_carts = [cid for cid, c in world.cart_causes.items() if c.cause == "timing"]
+    assert timing_carts == ["C-05"]
+    cart_id = timing_carts[0]
+    offers = [a for a in world.actions if a.entity_id == cart_id and a.kind == "mandate_offer"]
+    assert len(offers) == 1
+    assert offers[0].params.get("instrument") == "scheduled_mandate"
+    assert offers[0].params["amount_inr"] == world.carts[cart_id].amount_inr  # law 2
+    assert world.ledger.entities[cart_id].state == "KEPT"
+
+
+def test_the_trust_cause_carts_show_both_the_execute_and_the_revoke_branch(world: WorldRunner):
+    """Master doc §3.3's crown-jewel instrument, both outcomes: "delivery
+    confirmed -> mandate EXECUTED" and "customer rejects item -> mandate
+    REVOKED before execution -> nothing debited -> logged as clean loss, NOT
+    chased." The fixed dataset has exactly 2 `trust`-cause carts (C-07, C-08)."""
+    trust_carts = sorted(cid for cid, c in world.cart_causes.items() if c.cause == "trust")
+    assert trust_carts == ["C-07", "C-08"]
+
+    for cart_id in trust_carts:
+        offers = [a for a in world.actions if a.entity_id == cart_id and a.kind == "mandate_offer"]
+        assert len(offers) == 1
+        assert offers[0].params.get("instrument") == "delivery_secured_mandate"
+        assert offers[0].params["amount_inr"] == world.carts[cart_id].amount_inr  # law 2
+
+    states = {cid: world.ledger.entities[cid].state for cid in trust_carts}
+    assert states == {"C-07": "KEPT", "C-08": "CLEAN_LOSS"}
+
+    # the revoke branch genuinely never debited anything (master doc: "not chased")
+    revoked_id = "C-08"
+    executes = [a for a in world.actions if a.entity_id == revoked_id and a.kind == "mandate_execute"]
+    assert executes == []
+    revoke_events = [e for e in world.events if e.entity_id == revoked_id and e.type == "delivery_rejected"]
+    assert len(revoke_events) == 1
+
+
+def test_delivery_secured_mandate_carries_pay_nothing_today_copy(world: WorldRunner):
+    """Master doc §3.3's exact pitch: "Pay nothing today... Returned? Mandate
+    cancelled instantly, nothing debited." — checked against the real
+    dispatched message text, not just the structured param."""
+    messages = [
+        m for m in world.messenger.queue
+        if m.entity_id in ("C-07", "C-08") and m.rail == "delivery_secured_mandate"
+    ]
+    assert len(messages) == 2
+    for message in messages:
+        assert "pay nothing today" in message.text.lower()
+        assert "cancelled instantly" in message.text.lower()
+
+
 def test_real_perception_and_real_triage_ran(world: WorldRunner):
     """The runner is wired to the real extractor/triage, not to canned labels."""
     assert world.provider_name == "heuristic"
@@ -152,7 +246,11 @@ def test_real_perception_and_real_triage_ran(world: WorldRunner):
 def test_messages_are_rail_labelled(world: WorldRunner):
     rails = {m.rail for m in world.messenger.queue}
     assert "mandate_link" in rails, "no mandate ever went out on the mandate rail"
-    assert rails <= {"wa_native_payment", "mandate_link", "plain_link", "voice_note", "text_only"}
+    assert rails <= {
+        "wa_native_payment", "mandate_link", "delivery_secured_mandate",
+        "plain_link", "voice_note", "text_only",
+    }
+    assert "delivery_secured_mandate" in rails, "no delivery-secured mandate ever went out (master doc §3.3 crown jewel)"
     for message in world.messenger.queue:
         assert message.status in ("sent", "delivered")
 
@@ -246,7 +344,11 @@ def test_touch_cap_is_enforced_per_debtor_not_just_per_invoice(world: WorldRunne
         if kind_by_action.get(message.action_id) in TOUCH_CAP_EXEMPT_KINDS:
             continue
         invoice = world.invoices.get(message.entity_id)
-        debtor = invoice.debtor_id if invoice else message.entity_id
+        if invoice is not None:
+            debtor = invoice.debtor_id
+        else:
+            cart = world.carts.get(message.entity_id)
+            debtor = cart.customer_id if cart is not None else message.entity_id
         per_debtor.setdefault(debtor, []).append(message.ts)
     assert len(per_debtor) > 1, "a single-debtor run could never exercise the per-debtor scope"
 

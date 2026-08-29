@@ -107,9 +107,15 @@ def test_conversation_is_exactly_what_the_runner_holds_in_memory(client):
 
 
 def test_an_entity_with_no_thread_gets_an_honest_empty_conversation(client):
-    """A Scene-2 cart is a real ledger entity with no conversation at all. It
-    reports that in words rather than 404-ing or faking a thread."""
-    body = client.get("/entities/C-01/conversation").json()
+    """A Scene-2 Tier-0 reserve cart is a real ledger entity with genuinely no
+    conversation at all — master doc §8.6's whole point is the 0 in "0
+    touches", so the reserve pre-check recovers it silently, before any link
+    or mandate is ever dispatched. (Non-reserve carts DO get a real thread
+    now — master doc §3.3's cause -> instrument follow-through, built
+    2026-08-29 — so this test moved off C-01 to keep testing the genuinely
+    empty case rather than a since-fixed gap.) The route reports the empty
+    case in words rather than 404-ing or faking a thread."""
+    body = client.get("/entities/C-09/conversation").json()
     assert body["messages"] == []
     assert "no messages" in body["status"]
     assert body["debtor_name"] is None
@@ -411,7 +417,11 @@ def test_every_guardrail_summary_agrees_with_its_own_checklist(client):
 
 
 def test_a_day_with_no_activity_is_an_honest_empty_story(client):
-    story = client.get("/day/5/story").json()
+    """Day 5 stopped being quiet on 2026-08-29 once Scene 2's trust-cause
+    cart's delivery-secured mandate resolves on day CART_BEAT_DAY(1) +
+    DELIVERY_CONFIRM_OFFSET(4) = 5 (master doc §3.3) — moved to day 6, which
+    genuinely has none."""
+    story = client.get("/day/6/story").json()
     assert story["entities"] == []
     assert story["simulated"] is True
     assert "no audited activity" in story["status"]

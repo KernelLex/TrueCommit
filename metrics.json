@@ -3,7 +3,7 @@
   "scope": "60 invoices / 12 debtors (data/invoices.json), Scene 1 only. No Tier-0/reserve-failover row: that mechanic is cart-only (Scene 2), out of scope here.",
   "seed": 42,
   "days": 45,
-  "generated_at": "2026-08-27T17:19:25.305772+00:00",
+  "generated_at": "2026-08-29T00:52:28.598916+00:00",
   "arms": {
     "A_silence": {
       "arm": "A_silence",
@@ -53,7 +53,7 @@
       "false_escalation_definition": "% of firm/formal-stage escalation sends that went to an entity which ended KEPT anyway (measured proxy, not individual counterfactual certainty)",
       "cost_per_rupee_recovered": null,
       "bound_violations": 0,
-      "scope_note": "This figure is invoices only (per this report's scope), and will not match the previously-published Rs.23,31,496 whole-world figure in TRACK_BAR.md/BUILD_QUALITY.md - that figure additionally includes the 2 Tier-0 reserve-cart recoveries (Rs.1,899 + Rs.5,250 = Rs.7,149), which are a Scene 2/cart mechanic out of scope for this report. Reconciled exactly: Rs.23,31,496 - Rs.7,149 = Rs.23,24,347."
+      "scope_note": "This figure is invoices only (per this report's scope), and will not match the previously-published Rs.23,36,494 whole-world figure in TRACK_BAR.md/BUILD_QUALITY.md - that figure additionally includes Scene 2/cart mechanics out of scope for this report: the 2 Tier-0 reserve-cart recoveries (Rs.1,899 + Rs.5,250 = Rs.7,149) and, since 2026-08-29, the 2 non-reserve carts that recover through a matched instrument (master doc \u00a73.3: C-05's scheduled mandate + C-07's delivery-secured mandate, Rs.2,499 + Rs.2,499 = Rs.4,998). Reconciled exactly: Rs.23,36,494 - Rs.7,149 - Rs.4,998 = Rs.23,24,347."
     }
   },
   "mandate_acceptance_sensitivity_band": [
@@ -73,7 +73,7 @@
       "false_escalation_definition": "% of firm/formal-stage escalation sends that went to an entity which ended KEPT anyway (measured proxy, not individual counterfactual certainty)",
       "cost_per_rupee_recovered": null,
       "bound_violations": 0,
-      "scope_note": "This figure is invoices only (per this report's scope), and will not match the previously-published Rs.23,31,496 whole-world figure in TRACK_BAR.md/BUILD_QUALITY.md - that figure additionally includes the 2 Tier-0 reserve-cart recoveries (Rs.1,899 + Rs.5,250 = Rs.7,149), which are a Scene 2/cart mechanic out of scope for this report. Reconciled exactly: Rs.23,31,496 - Rs.7,149 = Rs.23,24,347.",
+      "scope_note": "This figure is invoices only (per this report's scope), and will not match the previously-published Rs.23,36,494 whole-world figure in TRACK_BAR.md/BUILD_QUALITY.md - that figure additionally includes Scene 2/cart mechanics out of scope for this report: the 2 Tier-0 reserve-cart recoveries (Rs.1,899 + Rs.5,250 = Rs.7,149) and, since 2026-08-29, the 2 non-reserve carts that recover through a matched instrument (master doc \u00a73.3: C-05's scheduled mandate + C-07's delivery-secured mandate, Rs.2,499 + Rs.2,499 = Rs.4,998). Reconciled exactly: Rs.23,36,494 - Rs.7,149 - Rs.4,998 = Rs.23,24,347.",
       "target_mandate_acceptance_rate": 0.1
     },
     {
@@ -92,7 +92,7 @@
       "false_escalation_definition": "% of firm/formal-stage escalation sends that went to an entity which ended KEPT anyway (measured proxy, not individual counterfactual certainty)",
       "cost_per_rupee_recovered": null,
       "bound_violations": 0,
-      "scope_note": "This figure is invoices only (per this report's scope), and will not match the previously-published Rs.23,31,496 whole-world figure in TRACK_BAR.md/BUILD_QUALITY.md - that figure additionally includes the 2 Tier-0 reserve-cart recoveries (Rs.1,899 + Rs.5,250 = Rs.7,149), which are a Scene 2/cart mechanic out of scope for this report. Reconciled exactly: Rs.23,31,496 - Rs.7,149 = Rs.23,24,347.",
+      "scope_note": "This figure is invoices only (per this report's scope), and will not match the previously-published Rs.23,36,494 whole-world figure in TRACK_BAR.md/BUILD_QUALITY.md - that figure additionally includes Scene 2/cart mechanics out of scope for this report: the 2 Tier-0 reserve-cart recoveries (Rs.1,899 + Rs.5,250 = Rs.7,149) and, since 2026-08-29, the 2 non-reserve carts that recover through a matched instrument (master doc \u00a73.3: C-05's scheduled mandate + C-07's delivery-secured mandate, Rs.2,499 + Rs.2,499 = Rs.4,998). Reconciled exactly: Rs.23,36,494 - Rs.7,149 - Rs.4,998 = Rs.23,24,347.",
       "target_mandate_acceptance_rate": 0.2
     },
     {
@@ -111,7 +111,7 @@
       "false_escalation_definition": "% of firm/formal-stage escalation sends that went to an entity which ended KEPT anyway (measured proxy, not individual counterfactual certainty)",
       "cost_per_rupee_recovered": null,
       "bound_violations": 0,
-      "scope_note": "This figure is invoices only (per this report's scope), and will not match the previously-published Rs.23,31,496 whole-world figure in TRACK_BAR.md/BUILD_QUALITY.md - that figure additionally includes the 2 Tier-0 reserve-cart recoveries (Rs.1,899 + Rs.5,250 = Rs.7,149), which are a Scene 2/cart mechanic out of scope for this report. Reconciled exactly: Rs.23,31,496 - Rs.7,149 = Rs.23,24,347.",
+      "scope_note": "This figure is invoices only (per this report's scope), and will not match the previously-published Rs.23,36,494 whole-world figure in TRACK_BAR.md/BUILD_QUALITY.md - that figure additionally includes Scene 2/cart mechanics out of scope for this report: the 2 Tier-0 reserve-cart recoveries (Rs.1,899 + Rs.5,250 = Rs.7,149) and, since 2026-08-29, the 2 non-reserve carts that recover through a matched instrument (master doc \u00a73.3: C-05's scheduled mandate + C-07's delivery-secured mandate, Rs.2,499 + Rs.2,499 = Rs.4,998). Reconciled exactly: Rs.23,36,494 - Rs.7,149 - Rs.4,998 = Rs.23,24,347.",
       "target_mandate_acceptance_rate": 0.3
     },
     {
@@ -130,7 +130,7 @@
       "false_escalation_definition": "% of firm/formal-stage escalation sends that went to an entity which ended KEPT anyway (measured proxy, not individual counterfactual certainty)",
       "cost_per_rupee_recovered": null,
       "bound_violations": 0,
-      "scope_note": "This figure is invoices only (per this report's scope), and will not match the previously-published Rs.23,31,496 whole-world figure in TRACK_BAR.md/BUILD_QUALITY.md - that figure additionally includes the 2 Tier-0 reserve-cart recoveries (Rs.1,899 + Rs.5,250 = Rs.7,149), which are a Scene 2/cart mechanic out of scope for this report. Reconciled exactly: Rs.23,31,496 - Rs.7,149 = Rs.23,24,347.",
+      "scope_note": "This figure is invoices only (per this report's scope), and will not match the previously-published Rs.23,36,494 whole-world figure in TRACK_BAR.md/BUILD_QUALITY.md - that figure additionally includes Scene 2/cart mechanics out of scope for this report: the 2 Tier-0 reserve-cart recoveries (Rs.1,899 + Rs.5,250 = Rs.7,149) and, since 2026-08-29, the 2 non-reserve carts that recover through a matched instrument (master doc \u00a73.3: C-05's scheduled mandate + C-07's delivery-secured mandate, Rs.2,499 + Rs.2,499 = Rs.4,998). Reconciled exactly: Rs.23,36,494 - Rs.7,149 - Rs.4,998 = Rs.23,24,347.",
       "target_mandate_acceptance_rate": 0.4
     },
     {
@@ -149,7 +149,7 @@
       "false_escalation_definition": "% of firm/formal-stage escalation sends that went to an entity which ended KEPT anyway (measured proxy, not individual counterfactual certainty)",
       "cost_per_rupee_recovered": null,
       "bound_violations": 0,
-      "scope_note": "This figure is invoices only (per this report's scope), and will not match the previously-published Rs.23,31,496 whole-world figure in TRACK_BAR.md/BUILD_QUALITY.md - that figure additionally includes the 2 Tier-0 reserve-cart recoveries (Rs.1,899 + Rs.5,250 = Rs.7,149), which are a Scene 2/cart mechanic out of scope for this report. Reconciled exactly: Rs.23,31,496 - Rs.7,149 = Rs.23,24,347.",
+      "scope_note": "This figure is invoices only (per this report's scope), and will not match the previously-published Rs.23,36,494 whole-world figure in TRACK_BAR.md/BUILD_QUALITY.md - that figure additionally includes Scene 2/cart mechanics out of scope for this report: the 2 Tier-0 reserve-cart recoveries (Rs.1,899 + Rs.5,250 = Rs.7,149) and, since 2026-08-29, the 2 non-reserve carts that recover through a matched instrument (master doc \u00a73.3: C-05's scheduled mandate + C-07's delivery-secured mandate, Rs.2,499 + Rs.2,499 = Rs.4,998). Reconciled exactly: Rs.23,36,494 - Rs.7,149 - Rs.4,998 = Rs.23,24,347.",
       "target_mandate_acceptance_rate": 0.5
     },
     {
@@ -168,7 +168,7 @@
       "false_escalation_definition": "% of firm/formal-stage escalation sends that went to an entity which ended KEPT anyway (measured proxy, not individual counterfactual certainty)",
       "cost_per_rupee_recovered": null,
       "bound_violations": 0,
-      "scope_note": "This figure is invoices only (per this report's scope), and will not match the previously-published Rs.23,31,496 whole-world figure in TRACK_BAR.md/BUILD_QUALITY.md - that figure additionally includes the 2 Tier-0 reserve-cart recoveries (Rs.1,899 + Rs.5,250 = Rs.7,149), which are a Scene 2/cart mechanic out of scope for this report. Reconciled exactly: Rs.23,31,496 - Rs.7,149 = Rs.23,24,347.",
+      "scope_note": "This figure is invoices only (per this report's scope), and will not match the previously-published Rs.23,36,494 whole-world figure in TRACK_BAR.md/BUILD_QUALITY.md - that figure additionally includes Scene 2/cart mechanics out of scope for this report: the 2 Tier-0 reserve-cart recoveries (Rs.1,899 + Rs.5,250 = Rs.7,149) and, since 2026-08-29, the 2 non-reserve carts that recover through a matched instrument (master doc \u00a73.3: C-05's scheduled mandate + C-07's delivery-secured mandate, Rs.2,499 + Rs.2,499 = Rs.4,998). Reconciled exactly: Rs.23,36,494 - Rs.7,149 - Rs.4,998 = Rs.23,24,347.",
       "target_mandate_acceptance_rate": 0.6
     }
   ]

@@ -358,6 +358,24 @@ def transition(entity: EntityState, event_type: str, payload: dict[str, Any], no
     elif event_type == "extraction_received":
         entity.invoice_amount_inr = payload.get("invoice_amount_inr", entity.invoice_amount_inr)
         entity.state = "PROMISED"
+    elif event_type == "cart_abandoned" and entity.state == "NEW" and not payload.get("reserve_active"):
+        # Scene 2 cause -> instrument routing (master doc §3.3). A timed or
+        # trust-hesitant cause carries a capturable commitment, so it lands on
+        # PROMISED exactly like a Scene-1 timed extraction does — a SEPARATE
+        # `mandate_offer_requested` event (mirroring `_offer_instrument`)
+        # still has to arrive before it becomes MANDATED. Every other cause
+        # (friction/price_shock/comparison/unknown) never enters that
+        # negotiation at all: "friction path -> NO discount, NO mandate" is
+        # worded as a direct routing rule, not a refusal to reach one.
+        #
+        # `reserve_active` carts are excluded here on purpose: master doc §8.6
+        # Tier-0 is a SEPARATE, higher-priority pre-check on the very next
+        # `payment_failed` event, and it needs these entities to still be NEW
+        # when it runs — routing them to LINKED/PROMISED first would dispatch
+        # a real link/mandate before Tier-0 ever gets a chance to short-
+        # circuit silently.
+        cause = payload.get("cause")
+        entity.state = "PROMISED" if cause in ("timing", "trust") else "LINKED"
     elif event_type == "mandate_offer_requested" and entity.state == "PROMISED":
         entity.state = "MANDATED"
     elif event_type == "mandate_refused":

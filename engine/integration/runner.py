@@ -144,6 +144,7 @@ terminates, no silent deaths") made true by the runner, not by luck."""
 
 CART_BEAT_DAY = 1
 LINK_TIMEOUT_DAYS = 2  # engine/action/sentinel.LINK_OPEN_TIMEOUT_HOURS == 48
+DELIVERY_CONFIRM_OFFSET = 4  # master doc §3.3: "delivery confirmed day+4"
 MANDATE_LEVELS = ("L1", "L2", "L3")
 """Promise levels firm enough to be worth converting into an instrument. L4/L5
 carry no commitment to capture, so no mandate is offered against them."""
@@ -163,7 +164,9 @@ DEMO_CUSTOMER_CONTACT = "+919812345678"
 DEMO_CUSTOMER_EMAIL = "promise-keeper-demo@example.com"
 
 # --- rails (master doc §8.5) -------------------------------------------------
-def _rail_for(kind: str, channel: str) -> Rail:
+def _rail_for(kind: str, channel: str, params: dict | None = None) -> Rail:
+    if kind == "mandate_offer" and (params or {}).get("instrument") == "delivery_secured_mandate":
+        return "delivery_secured_mandate"
     if kind == "mandate_offer":
         return "mandate_link"
     if kind == "link":
@@ -486,6 +489,10 @@ class WorldRunner:
         self.disputed_invoice_ids = sorted(
             i.id for i in self.invoices.values() if i.status == "disputed"
         )
+        self.active_cart_ids = sorted(c.id for c in self.carts.values() if not c.reserve_active)
+        """Scene-2 carts the idle sweep also has to close out (`_sweep_idle`)
+        — reserve carts are excluded because Tier-0 already resolves them
+        to KEPT on day 1, well before any sweep could run."""
 
     # -- clock ---------------------------------------------------------------
 
@@ -548,6 +555,12 @@ class WorldRunner:
                 self._resolve_pre_debit_notice(day, entity_id, data)
             elif kind == "link_timeout":
                 self._resolve_link_timeout(day, entity_id, data)
+            elif kind == "cart_mandate_execute":
+                self._resolve_cart_mandate_execute(day, entity_id)
+            elif kind == "cart_delivery_confirmed":
+                self._resolve_cart_delivery_confirmed(day, entity_id)
+            elif kind == "cart_delivery_rejected":
+                self._resolve_cart_delivery_rejected(day, entity_id)
 
     # -- day 0: triage + the invoices that arrive already disputed ------------
 
@@ -895,6 +908,117 @@ class WorldRunner:
                 # master doc §8.6 — the 0-touches beat: the reserve pre-check
                 # inside the ledger short-circuits the entire ladder.
                 self._emit("payment_failed", cart_id, {"drop_stage": cart.drop_stage}, day)
+                continue
+            if cause.cause in ("timing", "trust"):
+                # Mirrors `_offer_instrument`'s two-step Scene-1 shape: the
+                # cause alone only reaches PROMISED (state_machine.py), a
+                # separate `mandate_offer_requested` is the deliberate
+                # decision to actually make the offer.
+                self._emit("mandate_offer_requested", cart_id, {"cause": cause.cause}, day)
+                self._resolve_cart_mandate(cart_id, cause.cause, day)
+            # friction/price_shock/comparison/unknown reach LINKED directly
+            # from the `cart_abandoned` transition itself (state_machine.py)
+            # and already got their `link` Action dispatched by the `_emit`
+            # above — no further scripting needed here. Closure for those
+            # comes from the same machinery Scene 1 relies on: the Sentinel's
+            # 48h link-open window, and `_sweep_idle` (extended below to
+            # cover carts too) for anything still open with nothing pending.
+
+    def _resolve_cart_mandate(self, cart_id: str, cause: str, day: int) -> None:
+        """Scripted follow-through for Scene 2's two mandate-bearing causes
+        (master doc §3.3). Cart customers carry no persona — law 7's frozen
+        behaviour tables are Scene 1's debtor population only — so unlike
+        `_offer_instrument`'s ladder, nothing here reads `self.rng`: every
+        outcome is a fixed function of the cart's own id/cause. That keeps
+        SEED=42 determinism trivially true and can never perturb the persona
+        RNG stream Scene 1's numbers are pinned against.
+        """
+        entity = self.ledger.entities.get(cart_id)
+        if entity is None or entity.state != "MANDATED":
+            return  # bound-blocked or held — nothing confirmed yet
+        amount = entity.invoice_amount_inr
+        # A synthetic approval reply — same purpose as `_offer_instrument`'s
+        # `_inbound()` call for Scene 1: it is what marks the mandate-offer
+        # instrument OPENED (`_mark_instruments_opened`), so the Sentinel's
+        # own 48h link-open timer does not independently soft-refuse a
+        # mandate this method is about to confirm directly. Scene 2 has no
+        # extractor pass on cart threads (cause came from `cart_cause`, not
+        # from reading this message), so this goes through `_append_thread`
+        # directly rather than the full `_inbound()` pipeline.
+        channel = self.channel_of.get(cart_id, "wa")
+        reply_text = "yes, set it up" if cause == "timing" else "ok, approve the mandate"
+        reply = self._append_thread(cart_id, "in", channel, reply_text, day)
+        self._mark_instruments_opened(cart_id, reply, day)
+        self._emit("mandate_confirmed", cart_id, {"amount_inr": amount}, day)
+        self._mandate_pending.add(cart_id)
+
+        if cause == "timing":
+            execute_day = day + MANDATE_EXECUTE_OFFSET
+            self._schedule_at(max(day, execute_day - 1), "mandate_pre_debit_notice",
+                              cart_id, {"execute_day": execute_day})
+            self._schedule_at(execute_day, "cart_mandate_execute", cart_id, {})
+            return
+
+        # cause == "trust": the delivery-secured mandate (master doc §3.3's
+        # crown jewel). Exactly 2 trust carts exist in the fixed dataset, and
+        # the doc explicitly wants BOTH outcome branches demonstrated ("trust
+        # cart gets DELIVERY-SECURED MANDATE with the revoke branch shown").
+        # Which of the two shows which branch is an arbitrary modeling call
+        # the doc does not specify a ratio for: the FIRST trust cart by id
+        # gets the happy path (delivery confirmed, mandate executes); any
+        # other trust cart gets the revoke branch. See tracking/DECISIONS.md.
+        trust_carts = sorted(cid for cid, c in self.cart_causes.items() if c.cause == "trust")
+        delivery_day = day + DELIVERY_CONFIRM_OFFSET
+        if trust_carts and cart_id == trust_carts[0]:
+            self._schedule_at(delivery_day, "cart_delivery_confirmed", cart_id, {})
+        else:
+            self._schedule_at(delivery_day, "cart_delivery_rejected", cart_id, {})
+
+    def _resolve_cart_mandate_execute(self, day: int, entity_id: str) -> None:
+        """The timing-cause showcase beat: "approved -> executes on the
+        stated date -> order auto-placed -> recovered" (master doc §3.3),
+        scripted the same way `_resolve_mandate_execution`'s success branch
+        is, minus the persona draw this entity has none of."""
+        entity = self.ledger.entities.get(entity_id)
+        if entity is None or entity.state in TERMINAL_STATES:
+            self._mandate_pending.discard(entity_id)
+            return
+        amount = entity.invoice_amount_inr
+        self._emit("mandate_execute_success", entity_id, {"amount_inr": amount}, day)
+        event_ref = self.events[-1].event_id
+        self._mandate_pending.discard(entity_id)
+        self._send_post_debit_notice(entity_id, event_ref, day)
+
+    def _resolve_cart_delivery_confirmed(self, day: int, entity_id: str) -> None:
+        """The trust-cause happy path: "delivery confirmed day+4 -> mandate
+        EXECUTED -> merchant paid, zero RTO risk" (master doc §3.3)."""
+        entity = self.ledger.entities.get(entity_id)
+        if entity is None or entity.state in TERMINAL_STATES:
+            self._mandate_pending.discard(entity_id)
+            return
+        amount = entity.invoice_amount_inr
+        self._emit(
+            "mandate_execute_success", entity_id,
+            {"amount_inr": amount, "source": "delivery_secured_mandate"}, day,
+        )
+        event_ref = self.events[-1].event_id
+        self._mandate_pending.discard(entity_id)
+        self._send_post_debit_notice(entity_id, event_ref, day)
+
+    def _resolve_cart_delivery_rejected(self, day: int, entity_id: str) -> None:
+        """The trust-cause revoke branch: "customer rejects item -> mandate
+        REVOKED before execution -> nothing debited -> logged as clean loss,
+        NOT chased" (master doc §3.3). `delivery_rejected` already carries a
+        `state_machine.py` transition straight to CLEAN_LOSS — it just never
+        had a caller until this beat."""
+        self._mandate_pending.discard(entity_id)
+        entity = self.ledger.entities.get(entity_id)
+        if entity is None or entity.state in TERMINAL_STATES:
+            return
+        self._emit(
+            "delivery_rejected", entity_id,
+            {"reason": "customer rejected the item before the delivery-secured mandate executed"}, day,
+        )
 
     @staticmethod
     def _cart_record(cart: Cart) -> Invoice:
@@ -910,8 +1034,14 @@ class WorldRunner:
 
     def _sweep_idle(self, day: int) -> None:
         """CLAUDE.md law 5: no silent deaths. Past the last scheduled touch,
-        anything still open with nothing pending goes to a human."""
-        for entity_id in self.active_invoice_ids:
+        anything still open with nothing pending goes to a human.
+
+        Covers Scene-2 carts too (`active_cart_ids`): a friction/price_shock/
+        comparison/unknown cart whose link was never opened has no scripted
+        reply of any kind (carts carry no persona), so without this it would
+        sit at LINKED forever — exactly the "zero follow-through" silent
+        death this sweep exists to rule out."""
+        for entity_id in (*self.active_invoice_ids, *self.active_cart_ids):
             entity = self.ledger.entities.get(entity_id)
             if entity is None or entity.state in TERMINAL_STATES:
                 continue
@@ -1254,6 +1384,12 @@ class WorldRunner:
         the message can never quote a number perception invented."""
         amount = action.params.get("amount_inr") or self._amount(action.entity_id)
         url = detail.get("short_url", "")
+        if action.params.get("instrument") == "delivery_secured_mandate":
+            return (
+                f"Pay nothing today — Rs.{amount:,} for {action.entity_id} debits only on delivery "
+                f"confirmation. Returned? Mandate cancelled instantly, nothing debited. "
+                f"Approve here: {url}"
+            )
         if action.kind == "mandate_offer":
             due = self._promise_due_date(action.entity_id)
             when = due.strftime("%A") if due else "the agreed date"
@@ -1278,7 +1414,7 @@ class WorldRunner:
         email. Every other kind keeps the thread's channel exactly as before."""
         entity_id = action.entity_id
         channel = channel or self.channel_of.get(entity_id, "wa")
-        rail = _rail_for(action.kind, channel)
+        rail = _rail_for(action.kind, channel, action.params)
         message = self.messenger.send(action, channel, text, rail)
         self.messenger.mark_delivered(message.id)
         self.sentinel.record_send_attempt(action.id, entity_id, action.kind, True, self._ts(day))

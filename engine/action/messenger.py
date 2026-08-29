@@ -15,7 +15,15 @@ from pydantic import BaseModel, Field
 
 from engine.schemas import Action, MessageChannel
 
-Rail = Literal["wa_native_payment", "mandate_link", "plain_link", "voice_note", "sms_text", "text_only"]
+Rail = Literal[
+    "wa_native_payment", "mandate_link", "delivery_secured_mandate", "plain_link",
+    "voice_note", "sms_text", "text_only",
+]
+"""`delivery_secured_mandate` is its own rail, distinct from the generic
+`mandate_link` a scheduled/eNACH mandate rides on — master doc §8.5's whole
+pitch is that the agent "chooses WHICH payment object to drop in," so the two
+genuinely different Razorpay objects (a registration link vs the delivery-
+secured mandate) need genuinely different labels, not the same one."""
 DeliveryStatus = Literal["queued", "sent", "delivered", "failed"]
 
 _DEFAULT_RAIL_FOR_KIND: dict[str, Rail] = {

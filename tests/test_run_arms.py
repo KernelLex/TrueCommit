@@ -55,16 +55,27 @@ def test_arm_c_is_reproducible_with_the_same_seed():
 
 
 def test_arm_c_reconciles_exactly_against_the_pinned_whole_world_figure():
-    """The invoice-only Arm C figure plus the 2 Tier-0 reserve carts' amount
+    """The invoice-only Arm C figure, plus the 2 Tier-0 reserve carts' amount,
+    plus the non-reserve Scene-2 carts that now genuinely recover through
+    their matched instrument (master doc §3.3, built 2026-08-29: C-05's
+    scheduled mandate and C-07's delivery-secured mandate — see
+    tests/test_integration.py::test_the_timing_cause_cart_gets_a_scheduled_mandate_that_executes
+    / ::test_the_trust_cause_carts_show_both_the_execute_and_the_revoke_branch),
     must equal the canonical whole-world figure pinned by
     test_integration.py::test_the_45_day_distribution_is_the_number_the_docs_quote.
     If this test and that one ever disagree, one of the two pinned numbers is
-    stale, not this reconciliation.
+    stale, not this reconciliation. (Before 2026-08-29 the third term was 0,
+    because non-reserve carts got zero follow-through at all — see
+    tracking/BUILD_LOG.md.)
     """
     result = run_arm_c(seed=42)
-    RESERVE_CART_TOTAL_INR = 1_899 + 5_250
-    CANONICAL_WHOLE_WORLD_RECOVERED_INR = 2_331_496
-    assert result["recovered_amount_inr"] + RESERVE_CART_TOTAL_INR == CANONICAL_WHOLE_WORLD_RECOVERED_INR
+    RESERVE_CART_TOTAL_INR = 1_899 + 5_250  # C-09 + C-10, Tier-0
+    NON_RESERVE_CART_RECOVERED_INR = 2_499 + 2_499  # C-05 (timing) + C-07 (trust, happy path)
+    CANONICAL_WHOLE_WORLD_RECOVERED_INR = 2_336_494
+    assert (
+        result["recovered_amount_inr"] + RESERVE_CART_TOTAL_INR + NON_RESERVE_CART_RECOVERED_INR
+        == CANONICAL_WHOLE_WORLD_RECOVERED_INR
+    )
 
 
 def test_arm_c_never_mutates_the_frozen_mandate_table():
