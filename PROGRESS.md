@@ -1,5 +1,5 @@
 # PROGRESS.md — Promise Keeper build status
-### Last updated: 2026-08-30 (7-packet plan issued past the original cut order — debit-failure taxonomy [Packet 1] done; debtor-level judgment, red-team suite, acceptance learning, UI pass, live-channel demo, doc hygiene queued next, in that order) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
+### Last updated: 2026-08-30 (7-packet plan issued past the original cut order — debit-failure taxonomy [Packet 1] and debtor-level judgment [Packet 2] both done; red-team suite, acceptance learning, UI pass, live-channel demo, doc hygiene queued next, in that order) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
 
 > **Handing over between Claude sessions? Read `HANDOVER.md` first** — it carries the build mechanism (three-tier orchestration), the laws, the resume procedure, and the in-flight packet specs.
 
@@ -13,8 +13,8 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 
 **Packet status:**
 1. ✅ **Debit-failure taxonomy** — DONE, 2026-08-30. See the dated section below for the full story.
-2. ⏳ **Debtor-level judgment** (trust/escalation lifted from invoice to debtor, allocation under the touch budget) — queued next.
-3. ⏳ **Adversarial red-team suite** (4 exploit personas, quantified damage, README section) — queued.
+2. ✅ **Debtor-level judgment** — DONE, 2026-08-30. Dispute freeze + mandate-refusal posture lifted to the debtor, explicit touch-budget allocation. See the dated section below.
+3. ⏳ **Adversarial red-team suite** (4 exploit personas, quantified damage, README section) — queued next.
 4. ⏳ **Acceptance learning** (2nd Beta posterior over mandate registration, break-even number, dashboard meter) — queued.
 5. ⏳ **UI pass** (real browser check first, then make every packet above visible on screen) — queued.
 6. ⏳ **Live channel demo path** (IVR → real mandate → Telegram confirmation; WhatsApp free-form half only, no sandbox ContentSid templates) — queued.
@@ -27,8 +27,8 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 - RBI E-Mandate Framework compliance: pre-debit (T-1) and post-debit notices, both live in every mandate execution.
 - Real-world integrations, opt-in and rate-limited: Razorpay TEST mode (payment links, mandate registration, full create→execute→revoke lifecycle, human-verified), Twilio voice/IVR + WhatsApp, Telegram real dispatch.
 - Dashboard: Funnel, Entity Timeline (mandate lifecycle stepper, guardrail panel), Trust Curves, Human Review queue, System Health (Sentinel + Auditor widgets) — **Packet 5 will audit whether these actually reflect everything above on screen; not re-verified in a browser since 2026-08-26 per the user's own note.**
-- 3-arm measured-vs-simulated comparison (`eval/run_arms.py` → `metrics.json`), mandate-acceptance sensitivity band, reproducibility locked at seed 42 — **Arm C's own figures moved with Packet 1** (see below), regenerated and re-verified, not just its scope-note text.
-- **670/670 tests passing**, cold start verified from a fresh clone in 2 commands, no secrets in repo (grepped clean).
+- 3-arm measured-vs-simulated comparison (`eval/run_arms.py` → `metrics.json`), mandate-acceptance sensitivity band, reproducibility locked at seed 42 — **Arm C's own figures moved with Packets 1 and 2** (see below), regenerated and re-verified, not just scope-note text.
+- **690/690 tests passing**, cold start verified from a fresh clone in 2 commands, no secrets in repo (grepped clean).
 - README expanded to BUILD.md's own Day-9 outline (verified stats, metrics tables, architecture diagram, real-vs-simulated table, limitations section) — **Packet 7 will fix 4 stale contradictions elsewhere in this file, not the README.**
 
 **⏭ ASAP, in order:** finish the remaining 6 packets above (2 is next), THEN the pre-existing Day-9/10 items are still genuinely outstanding underneath all of this: the 30-second gif (needs a screen-recording tool this environment doesn't have), the `v1.0-freeze` tag (date-gated, Sep 1), the Day-10 submit checklist, and demo-day rehearsal (BUILD.md §6) — none of that has moved since 2026-08-29 and none of it is code.
@@ -49,7 +49,23 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 
 **Tests:** `tests/test_debit_failure.py`, 28 new tests, pin every reason's state-machine routing, trust delta, and dispatched action directly (not left to the stochastic 45-day run, which only exercises 2 of 5 reasons for real). 670/670 total. Full detail: `tracking/BUILD_LOG.md`/`DECISIONS.md`/`AI_JUDGMENT.md`/`TRACK_BAR.md` §2, all dated 2026-08-30.
 
-**Reported and stopped per the user's own instruction — Packet 2 (debtor-level judgment) starts next, not started yet.**
+**Reported and stopped per the user's own instruction, then continued into Packet 2 on "continue".**
+
+---
+
+## Continuing development (2026-08-30) — Packet 2: debtor-level judgment
+
+**What was built:** trust was already scored per debtor; escalation state and negotiation posture were not, so a debtor with five overdue invoices really could get one disputed and frozen correctly while the ladder kept autonomously chasing the other four — the exact gap named. Two mechanisms close it: `Ledger.disputed_entities_by_debtor` freezes every outbound action on a debtor's OTHER entities while any one of them is disputed (independently per dispute — a second, unrelated dispute keeps the freeze on after the first resolves), and `Ledger.debtor_mandate_refused` bars a fresh mandate offer on any of a debtor's entities once ANY of them earns a refusal (explicit decline, 48h silence, or a `mandate_revoked`/`account_closed_frozen` debit failure). Both check in at the same priority tier as the merchant kill-switch in `_gate()`; `check_bounds()` gained exactly one new, default-`False` optional parameter, so every pre-existing call site is untouched. Then, because it falls out naturally: `engine/judgment/allocation.py` gives a debtor holding more open invoices than their remaining weekly touch budget a deterministic, trust-and-age-ranked attempt ORDER instead of letting alphabetical `entity_id` ordering pick the winner by accident.
+
+**Two real bugs found by measuring the allocator, not by writing it.** First: the naive `trust + age` formula permanently starved every invoice but a debtor's single oldest one — trust is a DEBTOR-level value (identical across a debtor's own invoices) and age is fixed at data-load time, so a fixed invoice set ranks identically on every single beat for the whole run. Measured directly: 12 invoices across 8 debtors got zero touches for 45 days, recovery fell ~12% versus not allocating at all. Fixed with a rotation term measured relative to the least-touched entity in the eligible set. Second: the first version of `_run_outreach` pre-committed to a fixed top-N list and skipped calling `_outreach()` for the rest entirely — which also skipped the `outreach_sent` EVENT that moves an entity's state regardless of whether its message gets bound-blocked, delaying state progression for everyone else and pushing the pinned run's first Scene-1 mandate offer from day 7 to day 21. Fixed by reverting to "attempt everyone, just in priority order," letting the ledger's own unmodified touch-cap bound decide who actually gets through — which also fixes a third problem for free: a single entity's own reply can cascade past its message into a `mandate_offer` (both touch-counted), and a pre-committed list can't see that coming.
+
+**The flagship demo entity moved, said out loud rather than quietly patched around.** INV-001/Acme Traders — this test suite's (and per earlier UI-demo-run notes, likely the dashboard's own) long-standing mandate-lifecycle example — no longer reliably reaches a mandate offer within a short window once its debtor's siblings compete fairly. That is the feature working as intended on the specific invoice that used to win purely by being first alphabetically, not a regression. `INV-043`/Meenakshi Garments is this run's real, deterministic full-lifecycle instance now; every test needing one was redirected to it, and if the dashboard's own demo script named INV-001 specifically, it needs the same swap.
+
+**Numbers, measured and reconciled, a real decrease and not smoothed over:** whole-world `recovered_inr` ₹23,55,494 → ₹21,92,569 (a DECREASE of ~6.9%). Two honestly-argued causes, both in `tracking/DECISIONS.md`: the dispute freeze correctly removes some invoices from ever being chased again (the same shape of trade-off packet P8's touch cap already made), and the allocator's trust+age ranking doesn't predict which invoice will reply well on a GIVEN attempt (reply quality is drawn independently per entity per beat, law 7), so it sometimes spends a debtor's only touch on an invoice that replies vaguely instead of a sibling that would have converted. Arm C's own invoice-only figure moved by the identical amount; `metrics.json`/README's Tier-2 tables regenerated for real.
+
+**Tests:** `tests/test_debtor_judgment.py`, 20 new tests, pin the dispute freeze, the mandate-refusal lift, and the allocator's scoring/rotation/determinism directly. ~15 pre-existing tests across `test_integration.py`/`test_day_story.py`/`test_reminders.py`/`test_review_queue.py`/`test_debit_failure.py`/`test_run_arms.py` needed re-measured pins or a hand-driven scenario where the natural run no longer organically produces one — none weakened, each documented at its own site. 690/690 total, reproducibility re-verified byte-identical, `bound_violations()` empty. Full detail: `tracking/BUILD_LOG.md`/`DECISIONS.md`/`AI_JUDGMENT.md`/`TRACK_BAR.md` §2, all dated 2026-08-30.
+
+**Reported and stopped per the user's own instruction — Packet 3 (adversarial red-team suite) starts next, not started yet.**
 
 ---
 

@@ -151,6 +151,14 @@ next to a refusal. It is therefore prepended to every recorded checklist for an
 outbound kind, which keeps `allowed == all(checks passed)` true for a
 GateRecord exactly as `check_bounds_detailed()` keeps it true for the bounds."""
 
+DEBTOR_DISPUTE_FREEZE_CHECK = "debtor_dispute_freeze"
+"""The second gate that is NOT a hard bound: a debtor-level automatic freeze
+(packet: debtor-level judgment, 2026-08-30), not a merchant's manual pause.
+Enforced in `_gate()` at the same tier as the kill-switch, immediately after
+it, for the same reason: a recorded checklist must show the ACTUAL reason an
+action was refused, not "all bounds passed" next to a block this check alone
+produced."""
+
 
 class GateRecord(BaseModel):
     """WHAT `_gate()` ACTUALLY SAW, kept so a human can be shown it later.
@@ -223,18 +231,39 @@ class Ledger:
         """entity_id -> merchant kill-switch. True = no outbound action of any
         kind, from any path."""
         self.cart_cause: dict[str, str] = {}
-        self.debit_failure_reason: dict[str, str] = {}
-        """entity_id -> the last `DebitFailureReason` recorded against a
-        `mandate_execute_failed` event (engine/schemas.py). Same pattern and
-        same reasoning as `cart_cause` above: a side table the reason-aware
-        LINKED fallback (`_decide_action`) reads to pick the right copy and
-        amount, never mutated by anything upstream of `process_event`."""
         """entity_id -> the Scene-2 cause the perception layer inferred for
         this cart (master doc §3.3). Read only by `_decide_money_action` /
         `_decide_action`'s LINKED branch to pick the matching instrument and
         its copy — the cause itself is an LLM/heuristic OUTPUT, but which
         instrument a given cause maps to is fixed here, in code, never left
         to the model (CLAUDE.md law 1)."""
+        self.debit_failure_reason: dict[str, str] = {}
+        """entity_id -> the last `DebitFailureReason` recorded against a
+        `mandate_execute_failed` event (engine/schemas.py). Same pattern and
+        same reasoning as `cart_cause` above: a side table the reason-aware
+        LINKED fallback (`_decide_action`) reads to pick the right copy and
+        amount, never mutated by anything upstream of `process_event`."""
+
+        self.disputed_entities_by_debtor: dict[str, set[str]] = {}
+        """debtor_id -> the set of that debtor's OWN entities currently sitting
+        in DISPUTED. Non-empty means the debtor-level dispute freeze is on:
+        `_gate()` refuses every outbound action for every OTHER entity of
+        theirs (packet: debtor-level judgment, 2026-08-30 — "the system can
+        dispute-freeze one invoice while still chasing four others from the
+        same person" was the exact, real gap this closes). A set, not a bool,
+        because a SECOND independent dispute on a different invoice from the
+        same debtor must not be un-frozen by resolving only the first one."""
+        self.debtor_mandate_refused: dict[str, bool] = {}
+        """debtor_id -> True once ANY of their entities sets `mandate_refused`
+        (explicit refusal, a soft 48h timeout, or a debit failure reason that
+        implies one — `mandate_revoked`/`account_closed_frozen`). Read by
+        `_gate()` and passed into `check_bounds()`'s `debtor_mandate_refused`
+        argument so "this debtor doesn't want auto-debit" blocks a fresh
+        mandate offer on ANY of their invoices, not just the one that earned
+        it — negotiation posture lifted to the debtor, same reasoning as the
+        per-debtor touch cap. Monotonic by design (never cleared): a refusal
+        is a fact about how this debtor has behaved, not a state a later
+        event should quietly erase."""
 
         self.auditor_quarantined: bool = False
         """The Auditor's (engine/action/auditor.py, master doc §7.3) self-
@@ -287,6 +316,19 @@ class Ledger:
     def _debtor_touches(self, entity_id: str) -> list[dt.datetime]:
         return self.touches_by_debtor.get(self._debtor_id(entity_id), [])
 
+    def remaining_touch_budget(self, debtor_id: str, now: dt.datetime) -> int:
+        """How many more outbound touches this debtor can receive in the
+        current rolling week, across every entity they hold — the same
+        window `check_bounds()` enforces reactively, exposed publicly so a
+        caller can proactively ALLOCATE the remaining budget across several
+        eligible invoices instead of firing them in an arbitrary order and
+        letting the bound silently refuse whichever happen to be attempted
+        last (packet: debtor-level judgment, 2026-08-30 —
+        `WorldRunner._allocate_touch_budget`)."""
+        touches = self.touches_by_debtor.get(debtor_id, [])
+        recent = [t for t in touches if (now - t).days < state_machine.TOUCH_WINDOW_DAYS]
+        return max(0, state_machine.MAX_TOUCHES_PER_WEEK - len(recent))
+
     def _record_touch(self, entity: EntityState, now: dt.datetime) -> None:
         """One touch, written to both scopes: the entity's own history (funnel,
         timeline, the Tier-0 '0 touches' claim) and the debtor's window (the
@@ -337,6 +379,28 @@ class Ledger:
         new_state = state_machine.transition(entity, event_type, payload, now)
         self.entities[entity_id] = new_state
         self._audit(entity_id, "judgment", f"{event_type}: {prev_state} -> {new_state.state}", {"event": event_type, "payload": payload}, now)
+
+        # Debtor-level judgment (2026-08-30): dispute freeze and mandate-
+        # refusal posture are facts about the DEBTOR, tracked off the state
+        # transition itself so every entry point (autonomous ladder, IVR,
+        # manual reminders, human resolution) goes through the same place —
+        # there is exactly one spot state_machine.transition() ever returns
+        # from, and this is it.
+        if prev_state != "DISPUTED" and new_state.state == "DISPUTED":
+            self.disputed_entities_by_debtor.setdefault(debtor_id, set()).add(entity_id)
+        elif prev_state == "DISPUTED" and new_state.state != "DISPUTED":
+            # Only reachable via `human_resolution` (state_machine.py's
+            # terminal-state exception) — a merchant closing THIS dispute out
+            # does not necessarily clear the debtor-level freeze: a SECOND,
+            # independent dispute on a different invoice from the same
+            # debtor must keep the ladder frozen until it too is resolved.
+            still_open = self.disputed_entities_by_debtor.get(debtor_id)
+            if still_open is not None:
+                still_open.discard(entity_id)
+                if not still_open:
+                    del self.disputed_entities_by_debtor[debtor_id]
+        if new_state.mandate_refused:
+            self.debtor_mandate_refused[debtor_id] = True
 
         self._update_trust(event_type, new_state, debtor_id, now, payload)
         self._update_promise(event_type, entity_id, debtor_id, new_state, payload, now)
@@ -702,7 +766,12 @@ class Ledger:
 
         Order matters: the merchant kill-switch is checked FIRST, because it is
         the one refusal a human asked for by name and it should be the reason
-        recorded, not whichever bound happened to also apply.
+        recorded, not whichever bound happened to also apply. The debtor-level
+        dispute freeze (2026-08-30) is checked second, ahead of the ordinary
+        bounds, for the same reason — it is an automatic, debtor-wide fact
+        rather than a per-action bound, and a checklist that buried it behind
+        "all bounds passed" would misreport why the action was actually
+        refused.
 
         Packet P10 added the `GateRecord` written alongside the verdict. It
         changes nothing about the verdict: `check_bounds()` is still the only
@@ -713,7 +782,10 @@ class Ledger:
         """
         entity_id = entity.entity_id
         outbound = kind in state_machine.OUTBOUND_KINDS
+        debtor_id = self._debtor_id(entity_id)
         debtor_touches = self._debtor_touches(entity_id)
+        debtor_mandate_refused = self.debtor_mandate_refused.get(debtor_id, False)
+        disputed_siblings = self.disputed_entities_by_debtor.get(debtor_id, set()) - {entity_id}
 
         if self.paused.get(entity_id) and outbound:
             result = BoundsResult(allowed=False, reason="thread paused by merchant (kill-switch)")
@@ -721,13 +793,30 @@ class Ledger:
                 name=KILL_SWITCH_CHECK, passed=False,
                 detail="thread paused by the merchant (kill-switch) — the hard bounds were not consulted",
             )]
+        elif disputed_siblings and outbound:
+            result = BoundsResult(
+                allowed=False,
+                reason=f"debtor-level dispute freeze: {debtor_id} has an open dispute on {sorted(disputed_siblings)}",
+            )
+            checks = [BoundsCheck(
+                name=DEBTOR_DISPUTE_FREEZE_CHECK, passed=False,
+                detail=(
+                    f"{debtor_id} has an unresolved dispute on {sorted(disputed_siblings)} — "
+                    "the whole debtor's ladder is frozen until it resolves, the hard bounds were not consulted"
+                ),
+            )]
         else:
-            result = state_machine.check_bounds(entity, kind, params, now, debtor_touches)
+            result = state_machine.check_bounds(entity, kind, params, now, debtor_touches, debtor_mandate_refused)
             checks = [BoundsCheck(
                 name=KILL_SWITCH_CHECK, passed=True,
                 detail="thread is not paused by the merchant",
             )] if outbound else []
-            checks += state_machine.check_bounds_detailed(entity, kind, params, now, debtor_touches)
+            if outbound:
+                checks.append(BoundsCheck(
+                    name=DEBTOR_DISPUTE_FREEZE_CHECK, passed=True,
+                    detail=f"no unresolved dispute on any other entity of {debtor_id}",
+                ))
+            checks += state_machine.check_bounds_detailed(entity, kind, params, now, debtor_touches, debtor_mandate_refused)
 
         self._gate_seq += 1
         record = GateRecord(

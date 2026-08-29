@@ -92,12 +92,11 @@ def test_the_45_day_distribution_is_the_number_the_docs_quote(world: WorldRunner
     `distribution` was Scene-1-invoice-only and unaffected (Scene 2 carts are
     a disjoint entity population) — the block below is NOT that case.
 
-    2026-08-30 (debit-failure taxonomy): THIS change DOES move `distribution`
+    2026-08-30a (debit-failure taxonomy): THIS change DOES move `distribution`
     (KEPT 21->22, HUMAN_HANDOFF 27->26) — it's a Scene-1 mandate-execution
     feature, not a Scene-2 one. `recovered_inr` moved 2,336,494 -> 2,355,494
     (+19,000, matching Arm C's own invoice-only figure moving by the exact
-    same amount — `tests/test_run_arms.py`'s reconciliation test pins that
-    equality). `promises` moved because inserting a NEW RNG draw (which
+    same amount). `promises` moved because inserting a NEW RNG draw (which
     NACH/eMandate reason a bounced debit carries — `sim.personas.
     debit_failure_reason`) into the same shared persona stream every OTHER
     persona decision already draws from necessarily shifts every downstream
@@ -107,25 +106,57 @@ def test_the_45_day_distribution_is_the_number_the_docs_quote(world: WorldRunner
     reconciliation and why that RNG-stream choice is the correct one (this is
     a persona-behavior question, not a meta/analysis feature that needs its
     own isolated stream the way the Auditor's does).
+
+    2026-08-30b (debtor-level judgment — dispute freeze + touch-budget
+    allocation): a much bigger move, and an HONEST one, not a flattering one.
+    `distribution` -> {"KEPT": 18, "HUMAN_HANDOFF": 31, "DISPUTED": 2},
+    `recovered_inr` 2,355,494 -> 2,192,569 (a real DECREASE). Two real,
+    separately-measured causes, both argued in full in
+    tracking/DECISIONS.md 2026-08-30:
+      (a) the debtor-level dispute freeze correctly stops chasing a
+          disputed debtor's OTHER invoices (master doc's own stated goal —
+          "the system can dispute-freeze one invoice while chasing four
+          others... that is wrong"), which mechanically removes some
+          invoices from ever being touched again (D-08's INV-084 among
+          them) — a deliberate compliance trade-off, the same shape as
+          packet P8's touch-cap fix trading recovery for correctness.
+      (b) the touch-budget allocator ranks a debtor's invoices by trust
+          (constant across a debtor's own invoices — see allocation.py's
+          own docstring for why this reduces to mostly an AGE ordering) and
+          age, NOT by which one is actually likely to reply well on THIS
+          attempt — reply quality is drawn independently per entity per
+          beat (law 7), so "chase the oldest first" sometimes spends a
+          debtor's only touch on an invoice that replies vaguely, leaving a
+          SIBLING invoice that would have converted with only a bare
+          message and no room left in the week's budget for the mandate
+          offer its own good reply earned. This is a genuine, reportable
+          finding about the formula the packet specified ("using trust and
+          invoice age"), not a bug: age does not predict reply quality in
+          this dataset, because nothing makes it CLAIM to.
+    `promises` -> {"broken": 15, "kept": 15, "pending": 3}, `messages_sent`
+    126 -> 111 (fewer messages overall — the allocator concentrates budget
+    rather than spreading a partial touch to everyone), `held_actions_total`
+    4 -> 6 (two more money actions land in the low-confidence queue, a
+    consequence of which extractions happen at all shifting).
     """
     states = _invoice_states(world)
     distribution: dict[str, int] = {}
     for state in states.values():
         distribution[state] = distribution.get(state, 0) + 1
 
-    assert distribution == {"KEPT": 22, "HUMAN_HANDOFF": 26, "DISPUTED": 3}
+    assert distribution == {"KEPT": 18, "HUMAN_HANDOFF": 31, "DISPUTED": 2}
 
     summary = world.funnel_summary()
-    assert summary["recovered_inr"] == 2_355_494
+    assert summary["recovered_inr"] == 2_192_569
     active_value = sum(
         world.ledger.entities[eid].invoice_amount_inr for eid in world.active_invoice_ids
     )
     assert active_value == 6_971_068
-    assert round(100 * summary["recovered_inr"] / active_value, 1) == 33.8
+    assert round(100 * summary["recovered_inr"] / active_value, 1) == 31.5
 
-    assert summary["promises"] == {"broken": 12, "kept": 19, "pending": 6}
-    assert summary["messages_sent"] == 126
-    assert summary["held_actions_total"] == 4
+    assert summary["promises"] == {"broken": 15, "kept": 15, "pending": 3}
+    assert summary["messages_sent"] == 111
+    assert summary["held_actions_total"] == 6
     assert summary["dead_letter"] == 0
     assert world.bound_violations() == []
 
@@ -437,13 +468,44 @@ def test_disputes_stop_the_ladder_immediately(world: WorldRunner):
         assert later == [], f"{entity_id} got outbound messages after its dispute"
 
 
-def test_link_timeouts_are_treated_as_soft_refusals(world: WorldRunner):
+def test_link_timeouts_are_treated_as_soft_refusals():
     """Sentinel: sent != delivered != opened. A mandate link nobody opened
-    inside 48 virtual hours becomes a refusal signal, never an assumption."""
-    timeouts = [a for a in world.ledger.audit if "soft refusal" in a.summary]
-    assert timeouts, "no link ever timed out — the sentinel path is untested by this run"
-    refusals = {e.entity_id for e in world.events if e.type == "mandate_refused"}
-    assert refusals & {a.entity_id for a in timeouts}
+    inside 48 virtual hours becomes a refusal signal, never an assumption.
+
+    Built on a fresh, hand-driven runner rather than the shared 45-day
+    `world` fixture: since 2026-08-30's debtor-level touch-budget allocation,
+    every one of the 3 real Scene-1 mandate offers in that seeded run gets
+    CONFIRMED (a genuine, measured fact about this dataset under fair
+    per-debtor competition — see tracking/BUILD_LOG.md), so there is no
+    naturally-occurring unanswered mandate offer left to observe. The
+    SENTINEL WIRING this test exists to prove is unrelated to which entity
+    or persona reaches MANDATED, so it is driven directly instead of hoping
+    the stochastic run produces one. Deliberately does NOT `advance()` first
+    — this dataset's debtors all hold 5 invoices and reliably spend their
+    whole weekly touch cap on day 0's very first beat (measured: every
+    non-dispute-frozen debtor sits at 2/2 after one day), which would block
+    the very mandate offer this test needs to dispatch. A fresh runner's
+    entities start at zero touches before any beat has run, which is a
+    strictly safer guarantee of "budget available" than searching for one
+    after advancing."""
+    runner = WorldRunner(real_razorpay=False, real_tts=False)
+    entity_id = runner.active_invoice_ids[0]
+    now = runner.now()
+    amount = runner.invoices[entity_id].amount_inr
+    runner.ledger.process_event(
+        "extraction_received", entity_id, {"amount_inr": amount, "confidence": 0.95, "level": "L1"}, now,
+    )
+    action = runner.ledger.process_event("mandate_offer_requested", entity_id, {}, now)
+    assert action is not None and action.kind == "mandate_offer"
+    runner.dispatch_action(action)  # schedules the real 48h link-timeout, same as the autonomous path
+
+    day_of_timeout = runner.day + LINK_TIMEOUT_DAYS
+    runner._run_scheduled(day_of_timeout)  # nobody replied in between — genuine silence
+
+    timeouts = [a for a in runner.ledger.audit if a.entity_id == entity_id and "soft refusal" in a.summary]
+    assert timeouts, "the scheduled link-timeout never fired"
+    refusals = {e.entity_id for e in runner.events if e.type == "mandate_refused"}
+    assert entity_id in refusals
 
 
 # ---------------------------------------------------------------------------
@@ -475,7 +537,11 @@ def _opened(world: WorldRunner, entity_id: str) -> list:
 
 
 def test_a_confirmed_mandate_is_never_later_recorded_as_refused(world: WorldRunner):
-    """P10's smoking gun, INV-001 / Acme Traders, told as the trail tells it.
+    """P10's smoking gun, told as the trail tells it. Was INV-001/Acme
+    Traders until 2026-08-30's debtor-level touch-budget allocation stopped
+    it reliably reaching a mandate offer at all (see RUN_DAYS's docstring in
+    test_day_story.py for the same finding) — INV-043/Meenakshi Garments is
+    this run's real, deterministic confirm-and-execute instance instead.
 
     BEFORE this fix the run read: day 7 mandate offered -> persona move
     `confirm_mandate` -> `mandate_confirmed` -> **day 9 "link never opened
@@ -484,7 +550,7 @@ def test_a_confirmed_mandate_is_never_later_recorded_as_refused(world: WorldRunn
     later, set `entity.mandate_refused` (bound #7: no re-offer, ever) and fed
     `trust.update_refusal`.
     """
-    entity_id = "INV-001"
+    entity_id = "INV-043"
 
     offered = _instrument_dispatches(world, entity_id)
     assert len(offered) == 1 and offered[0].summary.startswith("mandate_offer dispatched")
@@ -521,12 +587,12 @@ def test_a_confirmed_mandate_is_never_later_recorded_as_refused(world: WorldRunn
 
 def test_a_confirmed_mandate_gets_a_pre_debit_and_a_post_debit_notice(world: WorldRunner):
     """RBI E-Mandate Framework 2026 (Step 6, 2026-08-27): a T-1 warning before
-    execution and a confirmation after. INV-001 (the test above) is a real,
-    deterministic instance in this seeded run — mandate confirmed day 7,
+    execution and a confirmation after. INV-043 (the test above) is a real,
+    deterministic instance in this seeded run — mandate confirmed day 21,
     executes successfully on the first attempt into KEPT — so this checks the
     real dispatched notices rather than the isolated-Ledger unit tests in
     tests/test_debit_notices.py."""
-    entity_id = "INV-001"
+    entity_id = "INV-043"
     amount = world.ledger.entities[entity_id].invoice_amount_inr
 
     pre = [a for a in world.actions if a.entity_id == entity_id and a.kind == "mandate_pre_debit_notice"]
@@ -605,44 +671,60 @@ def test_any_reply_opens_every_instrument_still_inside_its_window(world: WorldRu
     assert not phantom_refused
 
 
-def test_true_silence_still_soft_refuses_after_48h(world: WorldRunner):
-    """The half of `link_timed_out()` that was ALWAYS right, and must stay right:
-    a debtor who sends nothing back is a soft refusal at 48h. INV-003 is the run's
-    own instance — day 21 mandate offered, persona move `ignore` (which sends no
-    message at all), day 23 soft refusal -> `mandate_refused: MANDATED -> LINKED`.
-    """
-    entity_id = "INV-003"
+def test_true_silence_still_soft_refuses_after_48h():
+    """The half of `link_timed_out()` that was ALWAYS right, and must stay
+    right: a debtor who sends nothing back is a soft refusal at 48h.
 
-    offered = _instrument_dispatches(world, entity_id)
+    Built on a fresh, hand-driven runner for the same reason as
+    `test_link_timeouts_are_treated_as_soft_refusals` above (2026-08-30's
+    debtor-level allocation means every real mandate offer in the seeded
+    45-day run gets confirmed — there is no naturally-occurring "debtor went
+    silent" instance left to point at by entity id). No `_offer_instrument`
+    persona move fires here at all (this bypasses that path entirely, same
+    as the sibling test) — what's under test is the SENTINEL wiring: silence
+    in the actual conversation thread, not a labelled persona move, is what
+    the timeout logic reads. Deliberately does NOT `advance()` first, same
+    reasoning as the sibling test above (every debtor's weekly touch cap is
+    reliably spent by day 0's first beat in this dataset).
+    """
+    runner = WorldRunner(real_razorpay=False, real_tts=False)
+    entity_id = runner.active_invoice_ids[0]
+    now = runner.now()
+    amount = runner.invoices[entity_id].amount_inr
+    runner.ledger.process_event(
+        "extraction_received", entity_id, {"amount_inr": amount, "confidence": 0.95, "level": "L1"}, now,
+    )
+    action = runner.ledger.process_event("mandate_offer_requested", entity_id, {}, now)
+    assert action is not None and action.kind == "mandate_offer"
+    runner.dispatch_action(action)
+
+    offered = _instrument_dispatches(runner, entity_id)
     assert len(offered) == 1
     action_id = offered[0].detail["action_id"]
+    assert _opened(runner, entity_id) == [], "silence must never be read as an open"
 
-    assert [a for a in world.ledger.audit
-            if a.entity_id == entity_id and a.detail.get("move") == "ignore"]
-    assert _opened(world, entity_id) == [], "silence must never be read as an open"
+    day_of_timeout = runner.day + LINK_TIMEOUT_DAYS
+    runner._run_scheduled(day_of_timeout)  # genuine silence in between — no reply injected
 
-    # No inbound message AFTER the offer went out and before the window closed.
-    # Ordered by position in the thread, not by timestamp: `_ts()` is day-granular
-    # on purpose, so the promise that EARNED this offer shares a timestamp with
-    # it and only the trail says which came first. `thread_message_id` (packet
-    # P10) is what makes that resolvable at all.
-    timeout = next(a for a in world.ledger.audit
-                   if a.entity_id == entity_id and "soft refusal" in a.summary)
-    assert timeout.detail["action_id"] == action_id
-    assert (timeout.ts - offered[0].ts).days == LINK_TIMEOUT_DAYS
-
-    thread = world.threads[entity_id]
+    # No inbound message AFTER the offer went out — checked against the real
+    # thread, not a persona label, since this scenario never asked a persona
+    # to move at all.
+    thread = runner.threads[entity_id]
     sent_at = next(i for i, m in enumerate(thread)
                    if m.id == offered[0].detail["thread_message_id"])
-    assert [m for m in thread[sent_at + 1:] if m.direction == "in" and m.ts <= timeout.ts] == []
+    assert [m for m in thread[sent_at + 1:] if m.direction == "in"] == []
+
+    timeout = next(a for a in runner.ledger.audit
+                   if a.entity_id == entity_id and "soft refusal" in a.summary)
+    assert timeout.detail["action_id"] == action_id
 
     # the sentinel's own verdict is unchanged, and the ladder acted on it
-    assert world.sentinel.link_timed_out(action_id, timeout.ts) is True
-    assert [e.payload["reason"] for e in world.events
+    assert runner.sentinel.link_timed_out(action_id, timeout.ts) is True
+    assert [e.payload["reason"] for e in runner.events
             if e.entity_id == entity_id and e.type == "mandate_refused"] == [
         "mandate link never opened (soft refusal)"
     ]
-    assert world.ledger.entities[entity_id].mandate_refused is True
+    assert runner.ledger.entities[entity_id].mandate_refused is True
 
 
 def test_the_only_refusals_left_are_ones_a_debtor_actually_made(world: WorldRunner):
@@ -656,35 +738,40 @@ def test_the_only_refusals_left_are_ones_a_debtor_actually_made(world: WorldRunn
     2026-08-30: the debit-failure taxonomy's `mandate_revoked`/
     `account_closed_frozen` reasons also bar a future re-offer, with no
     `mandate_refused` EVENT at all (a different code path entirely — see
-    `state_machine.py`'s `mandate_execute_failed` handling). This test still
-    pins the ORIGINAL mechanism's event count exactly as before, and checks
-    the flag-level `barred` set in two clearly separated groups so a
-    regression in either mechanism is still caught on its own terms.
+    `state_machine.py`'s `mandate_execute_failed` handling).
+
+    2026-08-30b (debtor-level judgment): the honest, measured, and rather
+    striking follow-on — under the touch-budget allocator, this seeded run's
+    3 real Scene-1 mandate offers (INV-063, INV-043, INV-007) ALL get
+    confirmed and execute cleanly into KEPT. Zero refusal events, zero
+    barred entities, by EITHER mechanism. This is not a weakened test: the
+    link-timeout mechanism this row used to prove has its own dedicated,
+    hand-driven regression coverage now (`test_link_timeouts_are_treated_
+    as_soft_refusals`, `test_true_silence_still_soft_refuses_after_48h`,
+    both built 2026-08-30 for the identical reason — a natural instance no
+    longer exists in this run to point at by entity id), and the debit-
+    failure mechanism has its own unit-level coverage in
+    tests/test_debit_failure.py. This assertion is what remains genuinely
+    true of the real 45-day run today.
     """
     refusals = [e for e in world.events if e.type == "mandate_refused"]
     by_reason: dict[str, int] = {}
     for event in refusals:
         by_reason[event.payload["reason"]] = by_reason.get(event.payload["reason"], 0) + 1
 
-    assert by_reason == {
-        "debtor declined auto-debit": 3,
-        "mandate link never opened (soft refusal)": 1,
-    }
+    assert by_reason == {}
     barred = sorted(eid for eid, e in world.ledger.entities.items() if e.mandate_refused)
-    barred_by_debit_failure = sorted(
-        eid for eid in barred
-        if world.ledger.debit_failure_reason.get(eid) in ("mandate_revoked", "account_closed_frozen")
+    assert barred == []
+
+    # ...and every real SCENE-1 mandate offer this run actually made converts
+    # cleanly (Scene 2's cart mandates are a separate, scripted narrative —
+    # see tracking/DECISIONS.md 2026-08-30, Decision 3 — excluded here)
+    real_offers = sorted(
+        a.entity_id for a in world.actions
+        if a.kind == "mandate_offer" and not a.entity_id.startswith("C-")
     )
-    barred_by_refusal_event = sorted(eid for eid in barred if eid not in barred_by_debit_failure)
-
-    assert barred_by_refusal_event == ["INV-002", "INV-003", "INV-007", "INV-011"]
-    assert barred_by_debit_failure == ["INV-066"]
-    assert world.ledger.debit_failure_reason["INV-066"] == "mandate_revoked"
-
-    # ...and every refusal-event bar traces to a real debtor move in the trail
-    moves = {a.entity_id: a.detail["move"] for a in world.ledger.audit
-             if a.summary.startswith("debtor mandate move:")}
-    assert {moves[eid] for eid in barred_by_refusal_event} == {"refuse_but_promise", "ignore"}
+    assert real_offers == ["INV-007", "INV-043", "INV-063"]
+    assert all(world.ledger.entities[eid].state == "KEPT" for eid in real_offers)
 
 
 def test_termination_sweep_only_fires_after_the_touch_schedule_is_done(world: WorldRunner):
@@ -776,18 +863,47 @@ def test_the_45_day_run_really_holds_money_actions_for_a_human(world: WorldRunne
     assert logged == {h.id for h in held}
 
 
-def test_the_formal_notice_draft_reaches_the_queue_and_never_the_wire(world: WorldRunner):
+def test_the_formal_notice_draft_reaches_the_queue_and_never_the_wire():
     """Master doc §3.6's second reason the queue exists. The bound already
     refused to SEND it; without the queue the merchant would simply never see
-    the draft, and "compliant escalation" would end in a silence."""
-    drafts = [h for h in world.ledger.held_actions if not h.sendable]
-    assert drafts, "the ladder reached ESCALATE_3 but no draft reached the merchant"
+    the draft, and "compliant escalation" would end in a silence.
+
+    Built on a fresh, hand-driven runner rather than the shared 45-day
+    `world` fixture: since 2026-08-30's debtor-level judgment (dispute
+    freeze + touch-budget allocation), this seeded run's escalation ladder
+    no longer reaches ESCALATE_3 for ANY entity at all — every debtor either
+    converts before then or is correctly frozen by an open dispute (measured,
+    not assumed; see tracking/BUILD_LOG.md 2026-08-30). CLAUDE.md law 4's
+    guarantee here ("the agent never sends legal communication, human click
+    or not") is exactly as critical as it always was, so it keeps its own
+    deterministic regression test — three real `promise_broken` events,
+    driven directly, reach ESCALATE_3 exactly the way a real broken-promise
+    history would, with no dependency on which entity the stochastic run
+    happens to walk there this seed.
+    """
+    runner = WorldRunner(real_razorpay=False, real_tts=False)
+    entity_id = runner.active_invoice_ids[0]
+    now = runner.now()
+    for _ in range(3):
+        runner.ledger.process_event("promise_broken", entity_id, {}, now)
+    assert runner.ledger.entities[entity_id].state == "ESCALATE_3"
+
+    # ESCALATE_3's bound-blocked fallback holds the draft and emits a
+    # `human_handoff` ACTION but does not itself move `.state` — in the
+    # natural run that transition comes later (a further broken promise, or
+    # the idle sweep's `escalation_exhausted`); this drives that one event
+    # directly rather than waiting out the schedule.
+    runner.ledger.process_event("escalation_exhausted", entity_id, {}, now)
+    assert runner.ledger.entities[entity_id].state == "HUMAN_HANDOFF"
+
+    drafts = [h for h in runner.ledger.held_actions if not h.sendable]
+    assert drafts, "ESCALATE_3 must produce a held, non-sendable formal-notice draft"
     for draft in drafts:
         assert draft.action.params["stage"] == "legal"
-        assert world.ledger.entities[draft.entity_id].state == "HUMAN_HANDOFF"
+        assert runner.ledger.entities[draft.entity_id].state == "HUMAN_HANDOFF"
 
-    assert not [a for a in world.actions if a.params.get("stage") == "legal"]
-    assert not [m for m in world.messenger.queue if "merchant review required" in m.text]
+    assert not [a for a in runner.actions if a.params.get("stage") == "legal"]
+    assert not [m for m in runner.messenger.queue if "merchant review required" in m.text]
 
 
 def test_the_runner_never_emits_a_human_resolution_event(world: WorldRunner):
@@ -871,17 +987,20 @@ def test_a_low_confidence_extraction_reaches_the_clarify_gate_in_the_real_pipeli
     wire is proven here by pushing a genuinely ambiguous read through the real
     runner: real ledger, real bounds, real dispatch, real message on the rail.
     """
+    # Deliberately does NOT `advance()` at all: since 2026-08-30's debtor-
+    # level touch-budget allocation, this dataset's debtors all hold 5
+    # invoices each and reliably spend their whole weekly cap across just
+    # TWO of them on day 0's very first beat (measured, not assumed — every
+    # one of the 10 non-dispute-frozen debtors sits at exactly 2/2 touches
+    # after `advance(1)`), so waiting a day no longer reliably leaves ANY
+    # debtor with budget free. A brand-new runner's entities all start at
+    # zero touches before any beat has run at all, which is a strictly
+    # SAFER guarantee of "budget available" than searching for one after
+    # advancing — and `extraction_received` does not require the entity to
+    # already be TRIAGED (state_machine.py sets PROMISED unconditionally).
     runner = WorldRunner(real_razorpay=False, real_tts=False)
-    runner.advance(1)
-    # ...on a debtor with budget left this week, so the only thing that can
-    # decide the outcome here is the confidence gate.
     now = runner.now()
-    entity_id = next(
-        eid for eid in runner.active_invoice_ids
-        if runner.ledger.entities[eid].state not in TERMINAL_STATES
-        and sum(1 for t in runner.ledger._debtor_touches(eid)
-                if (now - t).days < TOUCH_WINDOW_DAYS) < MAX_TOUCHES_PER_WEEK
-    )
+    entity_id = runner.active_invoice_ids[0]
 
     action = runner.ledger.process_event(
         "extraction_received", entity_id,

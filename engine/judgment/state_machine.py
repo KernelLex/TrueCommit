@@ -126,6 +126,7 @@ def check_bounds(
     params: dict[str, Any],
     now: dt.datetime,
     debtor_touches: list[dt.datetime] | None = None,
+    debtor_mandate_refused: bool = False,
 ) -> BoundsResult:
     """The single gate every action passes through before it executes
     (CLAUDE.md law #4). Pure predicate — never mutates `entity`, never reads
@@ -145,6 +146,14 @@ def check_bounds(
     single-entity debtor, and never more permissive than the old per-entity
     behaviour. The Ledger always guarantees the debtor list is a superset of
     the entity's own touches, so the two never disagree in production.
+
+    `debtor_mandate_refused` (packet: debtor-level judgment, 2026-08-30) is
+    "negotiation posture" lifted the same way the touch cap already is: a
+    debtor who refused (or had revoked / a rail die on) a mandate on ONE of
+    their invoices should not be offered a fresh mandate on ANOTHER — the
+    refusal is a fact about the PERSON, not the invoice. Defaults to False so
+    every caller that predates this feature (including every existing test)
+    is completely unaffected.
     """
     if entity.state in TERMINAL_STATES and action_kind in OUTBOUND_KINDS:
         return BoundsResult(allowed=False, reason=f"entity in terminal state {entity.state}, no further outbound actions")
@@ -152,6 +161,11 @@ def check_bounds(
     if action_kind == "mandate_offer":
         if entity.mandate_refused:
             return BoundsResult(allowed=False, reason="post-refusal re-offer of mandate = NEVER")
+        if debtor_mandate_refused:
+            return BoundsResult(
+                allowed=False,
+                reason="post-refusal re-offer of mandate = NEVER (debtor-level: another invoice from this debtor already refused/revoked one)",
+            )
         if entity.renegotiation_count > RENEGOTIATION_CAP:
             return BoundsResult(allowed=False, reason=f"renegotiation_cap ({RENEGOTIATION_CAP}) exceeded, no more mandate offers")
         amount = params.get("amount_inr")
@@ -187,6 +201,7 @@ def check_bounds_detailed(
     params: dict[str, Any],
     now: dt.datetime,
     debtor_touches: list[dt.datetime] | None = None,
+    debtor_mandate_refused: bool = False,
 ) -> list[BoundsCheck]:
     """A LENS ON `check_bounds()`, NEVER A SECOND GATE.
 
@@ -245,11 +260,14 @@ def check_bounds_detailed(
     if action_kind == "mandate_offer":
         checks.append(BoundsCheck(
             name="no_mandate_reoffer_after_refusal",
-            passed=not entity.mandate_refused,
+            passed=not (entity.mandate_refused or debtor_mandate_refused),
             detail=(
                 "this debtor already refused a mandate — re-offer is NEVER allowed"
                 if entity.mandate_refused else
-                "no mandate refusal on record for this entity"
+                "another invoice from this debtor already refused/revoked a mandate — "
+                "re-offer is NEVER allowed at the debtor level either"
+                if debtor_mandate_refused else
+                "no mandate refusal on record for this entity or debtor"
             ),
         ))
         checks.append(BoundsCheck(

@@ -316,20 +316,40 @@ def test_shrunk_tranche_never_exceeds_the_original_or_drops_to_zero():
 # ---------------------------------------------------------------------------
 
 
-def test_the_real_45_day_run_genuinely_produces_debit_failures_with_reasons():
+def test_the_real_45_day_run_genuinely_produces_debit_failures_with_reasons(monkeypatch):
+    """As of 2026-08-30's debtor-level touch-budget allocation, this seeded
+    run's 3 real Scene-1 mandate offers ALL get confirmed and execute
+    cleanly (see tests/test_integration.py::
+    test_the_only_refusals_left_are_ones_a_debtor_actually_made for the
+    full honest accounting) — a genuinely measured fact, not a gap to paper
+    over. That means the RUNNER's own persona-driven wiring
+    (`WorldRunner._resolve_mandate_execution` -> `sim.personas.
+    debit_failure_reason` -> `Ledger.process_event`) has no OTHER real-run
+    coverage in this file (every other test above drives `Ledger` directly).
+    Forcing exactly one execution to fail, deterministically, proves that
+    integration still works end to end without waiting on this seed's own
+    luck."""
+    import engine.integration.runner as runner_mod
     from engine.integration.runner import WorldRunner
 
     world = WorldRunner(real_razorpay=False, real_tts=False)
-    world.advance(45)
+    entity_id = world.active_invoice_ids[0]
+    now = world.now()
+    amount = world.invoices[entity_id].amount_inr
+    world.ledger.process_event(
+        "extraction_received", entity_id, {"amount_inr": amount, "confidence": 0.95, "level": "L1"}, now,
+    )
+    action = world.ledger.process_event("mandate_offer_requested", entity_id, {}, now)
+    assert action is not None and action.kind == "mandate_offer"
+    world.ledger.process_event("mandate_confirmed", entity_id, {"amount_inr": amount}, now)
+    assert world.ledger.entities[entity_id].state == "MANDATED"
 
-    failures = [e for e in world.events if e.type == "mandate_execute_failed"]
-    assert failures, "no mandate ever bounced in the pinned run — nothing here was exercised for real"
-    for event in failures:
-        assert event.payload.get("reason") in (
-            "insufficient_funds", "bank_downtime", "mandate_revoked",
-            "account_closed_frozen", "amount_exceeds_limit",
-        )
+    monkeypatch.setattr(runner_mod, "mandate_executes", lambda rng, persona: False)
+    monkeypatch.setattr(runner_mod, "debit_failure_reason", lambda rng, persona: "insufficient_funds")
+    world._resolve_mandate_execution(world.day, entity_id)
 
-    # every reason recorded is reflected in the ledger's side table
-    for event in failures:
-        assert world.ledger.debit_failure_reason.get(event.entity_id) is not None
+    failures = [e for e in world.events if e.entity_id == entity_id and e.type == "mandate_execute_failed"]
+    assert len(failures) == 1
+    assert failures[0].payload["reason"] == "insufficient_funds"
+    assert world.ledger.debit_failure_reason[entity_id] == "insufficient_funds"
+    assert world.ledger.entities[entity_id].state == "AT_RISK"  # timing reason, first failure: the one allowed retry

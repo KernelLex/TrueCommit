@@ -68,16 +68,24 @@ def test_arm_c_reconciles_exactly_against_the_pinned_whole_world_figure():
     because non-reserve carts got zero follow-through at all — see
     tracking/BUILD_LOG.md.)
 
-    2026-08-30 (debit-failure taxonomy): Arm C's OWN invoice-only figure
+    2026-08-30a (debit-failure taxonomy): Arm C's OWN invoice-only figure
     moved 2,324,347 -> 2,343,347 (+19,000) — this feature is Scene-1 (mandate
     execution), squarely inside Arm C's own scope, unlike the Scene-2-only
     change above. The whole-world canonical figure moved by the identical
     +19,000, so the reconciliation still holds exactly.
+
+    2026-08-30b (debtor-level judgment): Arm C's own figure moved again,
+    2,343,347 -> 2,180,422 — also squarely Scene-1 (the touch-budget
+    allocator and dispute freeze both operate on `active_invoice_ids`). The
+    whole-world canonical figure moved by the identical amount, so the
+    reconciliation still holds exactly; see
+    test_integration.py::test_the_45_day_distribution_is_the_number_the_docs_quote
+    for the full honest accounting of why the number went DOWN, not up.
     """
     result = run_arm_c(seed=42)
     RESERVE_CART_TOTAL_INR = 1_899 + 5_250  # C-09 + C-10, Tier-0
     NON_RESERVE_CART_RECOVERED_INR = 2_499 + 2_499  # C-05 (timing) + C-07 (trust, happy path)
-    CANONICAL_WHOLE_WORLD_RECOVERED_INR = 2_355_494
+    CANONICAL_WHOLE_WORLD_RECOVERED_INR = 2_192_569
     assert (
         result["recovered_amount_inr"] + RESERVE_CART_TOTAL_INR + NON_RESERVE_CART_RECOVERED_INR
         == CANONICAL_WHOLE_WORLD_RECOVERED_INR

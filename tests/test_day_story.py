@@ -20,9 +20,19 @@ from engine.integration import day_story
 from engine.integration.runner import WorldRunner
 from sim.run import SIM_EPOCH
 
-RUN_DAYS = 12
-"""Long enough to reach a mandate flow (day 7 offers one) and a second outreach
-beat, short enough that every test in this module stays fast."""
+RUN_DAYS = 22
+"""Long enough to reach a mandate flow, short enough that every test in this
+module stays fast. Was 12 (day 7 offered one) until 2026-08-30's debtor-level
+touch-budget allocation (`engine/judgment/allocation.py`): a debtor's several
+open invoices now genuinely compete for the same scarce weekly budget instead
+of the alphabetically-first one always winning it by accident, so the FIRST
+Scene-1 mandate offer that survives the cascade (message + the extraction it
+triggers both spend touch budget) lands on day 21 for this seed — measured,
+not guessed. INV-001/Acme Traders (this file's long-standing demo entity)
+no longer reliably completes a mandate flow within a short window at all
+under fair competition; INV-043/Meenakshi Garments does (day 21, with a
+real pre-seeded conversation thread), and is what mandate-flow-specific
+tests below use instead. See tracking/BUILD_LOG.md/DECISIONS.md 2026-08-30."""
 
 
 @pytest.fixture(scope="module")
@@ -84,8 +94,8 @@ def test_every_debtor_the_ledger_knows_appears_exactly_once(client):
 
 
 def test_conversation_returns_the_real_thread_in_both_directions(client):
-    body = client.get("/entities/INV-001/conversation").json()
-    assert body["debtor_name"] == "Acme Traders"
+    body = client.get("/entities/INV-043/conversation").json()
+    assert body["debtor_name"] == "Meenakshi Garments"
     assert body["channel"] == "wa"
     directions = {m["direction"] for m in body["messages"]}
     assert directions == {"in", "out"}
@@ -189,7 +199,7 @@ def test_guardrail_preview_404s_on_an_unknown_entity(client):
 
 
 def test_mandate_timeline_reconstructs_the_lifecycle_from_the_audit_trail(client):
-    body = client.get("/entities/INV-001/mandate-timeline").json()
+    body = client.get("/entities/INV-043/mandate-timeline").json()
     steps = [s["step"] for s in body["steps"]]
     assert steps[0] == "offered"
     assert "offer_created" in steps
@@ -197,13 +207,13 @@ def test_mandate_timeline_reconstructs_the_lifecycle_from_the_audit_trail(client
     assert "debtor_response" in steps
 
     # every step points at the audit entry it was read out of
-    audit_ids = {a["id"] for a in client.get("/entities/INV-001/audit").json()}
+    audit_ids = {a["id"] for a in client.get("/entities/INV-043/audit").json()}
     assert all(s["audit_id"] in audit_ids for s in body["steps"])
     assert [s["ts"] for s in body["steps"]] == sorted(s["ts"] for s in body["steps"])
 
 
 def test_mandate_timeline_never_calls_a_simulated_step_real(client):
-    body = client.get("/entities/INV-001/mandate-timeline").json()
+    body = client.get("/entities/INV-043/mandate-timeline").json()
     registered = next(s for s in body["steps"] if s["step"] == "registered")
     # this run is offline (PK_REAL_RAZORPAY unset), so the link is simulated and
     # must be labelled as such, with no REAL badge anywhere near it
@@ -330,12 +340,15 @@ def test_day_story_trust_is_the_posterior_from_that_day_not_todays(client):
 
 
 def test_day_story_beats_carry_the_actual_conversation_text(client):
-    story = client.get("/day/7/story").json()
-    block = next(b for b in story["entities"] if b["entity_id"] == "INV-001")
+    # INV-001 has no in/out message pair on any single day post-2026-08-30's
+    # debtor-level allocation (see RUN_DAYS's own docstring above) — INV-043
+    # genuinely completes its message/reply exchange on day 21.
+    story = client.get("/day/21/story").json()
+    block = next(b for b in story["entities"] if b["entity_id"] == "INV-043")
     messages = [b for b in block["beats"] if b["type"] == "message"]
     assert {m["direction"] for m in messages} == {"in", "out"}
 
-    thread = {m["id"]: m["text"] for m in client.get("/entities/INV-001/conversation").json()["messages"]}
+    thread = {m["id"]: m["text"] for m in client.get("/entities/INV-043/conversation").json()["messages"]}
     for message in messages:
         assert message["text"] == thread[message["message_id"]]
 
@@ -344,15 +357,15 @@ def test_day_story_beats_stay_in_the_order_the_trail_recorded_them(client):
     """Every beat of a simulated day shares one timestamp on purpose, so the
     order has to come from the append order of the audit trail. An outbound
     message must appear before the reply it drew."""
-    story = client.get("/day/7/story").json()
-    block = next(b for b in story["entities"] if b["entity_id"] == "INV-001")
+    story = client.get("/day/21/story").json()
+    block = next(b for b in story["entities"] if b["entity_id"] == "INV-043")
     kinds = [(b["type"], b.get("direction")) for b in block["beats"]]
     first_out = kinds.index(("message", "out"))
     first_in = kinds.index(("message", "in"))
     assert first_out < first_in
 
     audit_ids = [b["audit_id"] for b in block["beats"] if b["audit_id"]]
-    trail = [a["id"] for a in client.get("/entities/INV-001/audit").json()]
+    trail = [a["id"] for a in client.get("/entities/INV-043/audit").json()]
     assert audit_ids == [i for i in trail if i in set(audit_ids)]
 
 
@@ -384,14 +397,14 @@ def test_an_allowed_money_action_shows_the_checklist_it_really_passed(client):
     every check come from the GateRecord written when the action was created."""
     from api.main import ledger
 
-    story = client.get("/day/7/story").json()
-    block = next(b for b in story["entities"] if b["entity_id"] == "INV-001")
+    story = client.get("/day/21/story").json()
+    block = next(b for b in story["entities"] if b["entity_id"] == "INV-043")
     offer = next(
         beat["guardrail_summary"] for beat in block["beats"]
         if beat["guardrail_summary"] and beat["guardrail_summary"]["kind"] == "mandate_offer"
     )
     assert offer["status"] == "allowed"
-    assert offer["params"]["amount_inr"] == 40000
+    assert offer["params"]["amount_inr"] == 19000
     assert offer["passed"] == offer["total"]
 
     record = next(r for r in ledger.gate_log if r.action_id == offer["action_id"])

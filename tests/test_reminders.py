@@ -521,18 +521,32 @@ def test_reminders_are_not_registered_as_openable_instruments(world):
 
 
 def _entity_with_budget(client) -> str:
+    """An entity with its full weekly touch budget untouched. Callers must
+    NOT `/advance` first: since 2026-08-30's debtor-level touch-budget
+    allocator, this dataset's debtors all hold 5 invoices and reliably
+    spend their whole weekly cap across the first outreach beat alone
+    (measured: every non-dispute-frozen debtor sits at 2/2 after day 0), so
+    waiting even a single day no longer reliably leaves ANY debtor with
+    budget free. A brand-new, unadvanced world's entities all start at zero
+    touches, which manual_reminder() (this helper exists for) does not
+    require any prior triage to accept."""
     from api.main import ledger
 
     return next(
         eid for eid, e in ledger.entities.items()
         if e.state not in sm.TERMINAL_STATES
         and len(ledger.touches_by_debtor.get(ledger.debtor_of.get(eid, eid), [])) < sm.MAX_TOUCHES_PER_WEEK
+        # 2026-08-30: a debtor-level dispute freeze (engine/judgment/ledger.py's
+        # `disputed_entities_by_debtor`) also has zero touches while frozen —
+        # excluded here since `_gate()` refuses a manual reminder on it too,
+        # for a completely different reason than the touch cap this helper
+        # means to isolate.
+        and not ledger.disputed_entities_by_debtor.get(ledger.debtor_of.get(eid, eid))
     )
 
 
 def test_remind_now_sends_a_real_sms_and_lists_it_back(client):
-    client.post("/advance", json={"days": 1})
-    entity_id = _entity_with_budget(client)
+    entity_id = _entity_with_budget(client)  # a fresh, unadvanced world — see the helper's own docstring
 
     body = client.post(f"/entities/{entity_id}/remind-now", json={"channel": "sms"}).json()
     assert body["blocked"] is False
@@ -551,8 +565,7 @@ def test_remind_now_reports_a_bound_refusal_as_a_200_not_an_error(client):
     """P9 decision #7, restated for this route: the request was valid and the
     system did exactly what it should. Making a working stopping rule an HTTP
     error would teach the dashboard to treat it as a failure."""
-    client.post("/advance", json={"days": 1})
-    entity_id = _entity_with_budget(client)
+    entity_id = _entity_with_budget(client)  # a fresh, unadvanced world — see the helper's own docstring
 
     for _ in range(sm.MAX_TOUCHES_PER_WEEK + 1):
         response = client.post(f"/entities/{entity_id}/remind-now", json={"channel": "sms"})
@@ -571,8 +584,7 @@ def test_remind_now_reports_a_bound_refusal_as_a_200_not_an_error(client):
 
 
 def test_remind_now_refuses_a_channel_it_does_not_own(client):
-    client.post("/advance", json={"days": 1})
-    entity_id = _entity_with_budget(client)
+    entity_id = _entity_with_budget(client)  # a fresh, unadvanced world — see the helper's own docstring
     # "message" is now a real channel (packet P15) — "email" is not, and never
     # will be: email is a thread CHANNEL, not a reminder kind an operator picks.
     assert client.post(
@@ -583,8 +595,7 @@ def test_remind_now_refuses_a_channel_it_does_not_own(client):
 def test_remind_now_sends_a_real_message_and_lists_it_back(client):
     """packet P15's third manual channel, exercised the way an operator
     actually drives it: through the API, end to end."""
-    client.post("/advance", json={"days": 1})
-    entity_id = _entity_with_budget(client)
+    entity_id = _entity_with_budget(client)  # a fresh, unadvanced world — see the helper's own docstring
 
     body = client.post(f"/entities/{entity_id}/remind-now", json={"channel": "message"}).json()
     assert body["blocked"] is False
@@ -605,8 +616,7 @@ def test_reminders_404s_on_an_unknown_entity(client):
 
 
 def test_remind_now_is_refused_on_a_paused_thread_through_the_api(client):
-    client.post("/advance", json={"days": 1})
-    entity_id = _entity_with_budget(client)
+    entity_id = _entity_with_budget(client)  # a fresh, unadvanced world — see the helper's own docstring
     client.post(f"/entities/{entity_id}/pause")
     body = client.post(f"/entities/{entity_id}/remind-now", json={"channel": "sms"}).json()
     assert body["blocked"] is True

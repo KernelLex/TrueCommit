@@ -117,7 +117,7 @@ from engine.action.messenger import Messenger, Rail
 from engine.action.razorpay_client import RazorpayError
 from engine.action.sentinel import MAX_RETRIES, Sentinel
 from engine.action import telegram_bot, telephony, tts
-from engine.judgment import trust
+from engine.judgment import allocation, trust
 from engine.judgment.ledger import Ledger
 from engine.judgment.state_machine import MAX_TOUCHES_PER_WEEK, TERMINAL_STATES, TOUCH_WINDOW_DAYS
 from engine.perception.providers import get_provider
@@ -593,9 +593,18 @@ class WorldRunner:
     # -- outreach cadence ----------------------------------------------------
 
     def _run_outreach(self, day: int) -> None:
+        """Groups today's eligible invoices by debtor before dispatching
+        anything, so a debtor holding more open invoices than their
+        remaining weekly touch budget gets an explicit, trust-and-age-
+        ranked CHOICE of which ones to chase (packet: debtor-level judgment,
+        2026-08-30 — `engine/judgment/allocation.py`) instead of whichever
+        happened to be attempted first in `active_invoice_ids`'s
+        alphabetical order silently winning by accident."""
         stage = TOUCH_STAGE_BY_DAY.get(day)
         if stage is None:
             return
+        now = self._ts(day)
+        eligible_by_debtor: dict[str, list[str]] = {}
         for entity_id in self.active_invoice_ids:
             entity = self.ledger.entities.get(entity_id)
             if entity is None or entity.state in TERMINAL_STATES:
@@ -610,9 +619,45 @@ class WorldRunner:
                 self._audit(entity_id, "sentinel", "outreach skipped: thread paused by merchant",
                             {"stage": stage, "state": entity.state}, day)
                 continue
+            debtor_id = self._contact_key(entity_id)
+            disputed_siblings = self.ledger.disputed_entities_by_debtor.get(debtor_id, set()) - {entity_id}
+            if disputed_siblings:
+                # Debtor-level dispute freeze, same reasoning as the pause
+                # skip just above: `_gate()` would refuse this anyway, so
+                # asking the persona to react to a message never sent would
+                # simulate an answer to nothing.
+                self._audit(entity_id, "sentinel", "outreach skipped: debtor-level dispute freeze",
+                            {"stage": stage, "state": entity.state, "debtor_id": debtor_id,
+                             "disputed_siblings": sorted(disputed_siblings)}, day)
+                continue
             if entity_id in self._mandate_pending or entity_id in self._pending_promise:
                 continue  # a commitment is already live; chasing it now would be a wasted touch
-            self._outreach(entity_id, stage, day)
+            eligible_by_debtor.setdefault(debtor_id, []).append(entity_id)
+
+        for debtor_id, entity_ids in eligible_by_debtor.items():
+            entity_ids.sort()  # fixed order before ranking — SEED=42 determinism (law 6)
+            for entity_id in self._rank_by_priority(debtor_id, entity_ids, now):
+                self._outreach(entity_id, stage, day)
+
+    def _rank_by_priority(self, debtor_id: str, entity_ids: list[str], now: dt.datetime) -> list[str]:
+        """Thin adapter: gathers the two real inputs `allocation.py`'s pure
+        ranking needs (each invoice's days-past-due, the debtor's current
+        trust posterior, each invoice's own touch count so far) and defers
+        the actual ordering to it. Every entity comes back, just reordered —
+        see `allocation.rank_by_priority`'s docstring for why `_run_outreach`
+        still attempts all of them rather than truncating to a fixed set."""
+        if len(entity_ids) <= 1:
+            return entity_ids
+        age_days_by_entity = {
+            eid: max((now.date() - self.invoices[eid].due).days, 0) for eid in entity_ids
+        }
+        touches_so_far_by_entity = {
+            eid: len(self.ledger.entities[eid].touches) for eid in entity_ids
+        }
+        debtor_trust = self.ledger.current_trust(debtor_id, now)
+        return allocation.rank_by_priority(
+            entity_ids, age_days_by_entity, debtor_trust, touches_so_far_by_entity,
+        )
 
     def _outreach(self, entity_id: str, stage: str, day: int) -> None:
         action = self._emit("outreach_sent", entity_id, {"stage": stage}, day)

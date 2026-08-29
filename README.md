@@ -24,7 +24,7 @@ powershell -ExecutionPolicy Bypass -File run.ps1
 
 `setup` creates a Python venv, installs dependencies, and installs the dashboard's `node_modules`. `run` starts the API and the dashboard together. The app runs fully offline with no API keys — copy `.env.example` to `.env` and add real keys only for the live-Razorpay / real-channel demos.
 
-Run the test suite (642 tests as of this writing, fully offline):
+Run the test suite (690 tests as of this writing, fully offline):
 ```
 .venv/Scripts/python.exe -m pytest tests/   # Windows
 .venv/bin/python -m pytest tests/           # Mac/Linux
@@ -41,7 +41,7 @@ This project measures what it can and labels what it can't (CLAUDE.md's design l
 | Promise extraction accuracy (L1–L5 vs. hand labels) | **97.7%** heuristic (in-sample) · **88.6%** qwen2.5:7b | ≥85% | The heuristic number is in-sample (rules authored with the labels visible) — the honest ceiling, not a held-out estimate. The LLM number is the one that means something as a generalization claim. |
 | Root-cause triage accuracy | **91.7%** on the 24 invoices with a message thread · 71.7% across all 60 | ≥90% | Gated on threaded invoices by explicit ruling (`tracking/DECISIONS.md`) — a triage call with zero messages to read is an information-ceiling problem, not a classifier failure, and every provider tested (heuristic and two Ollama model sizes) hits the same wall on those cases. |
 | Reproducibility | Byte-identical across independent runs at seed 42 | diff = empty | Dataset generator, simulator, integration runner, and the 3-arm runner all re-verified — see `tracking/BUILD_QUALITY.md`. |
-| Test suite | **642 tests, offline by default** | — | `pytest tests/` — no network call happens unless a `PK_REAL_*` flag is explicitly opted into, with one deliberate exception: a live smoke test against a local Ollama server (skips cleanly if Ollama isn't running). |
+| Test suite | **690 tests, offline by default** | — | `pytest tests/` — no network call happens unless a `PK_REAL_*` flag is explicitly opted into, with one deliberate exception: a live smoke test against a local Ollama server (skips cleanly if Ollama isn't running). |
 
 ### Tier 2 — simulated (frozen personas, never tuned to flatter the result)
 
@@ -51,22 +51,22 @@ Same seed, same 60-invoice/12-debtor dataset, same frozen persona behavior table
 |---|---|---|---|---|
 | A — silence (no intervention) | ₹0 | 0.0% | — | — |
 | B — generic reminder every 3 days, no judgment layer | ₹55,08,943 | 71.2% | 11.26 | 20.0 days |
-| C — Promise Keeper (this system) | ₹23,24,347 | 30.0% | **4.76** | 42.0 days |
+| C — Promise Keeper (this system) | ₹21,80,422 | 28.2% | **5.11** | 47.7 days |
 
-**The honest headline, not smoothed over:** Arm B recovers more nominal rupees than Arm C. It has no touch-frequency limit; Arm C is bounded by the same per-debtor contact cap (`MAX_TOUCHES_PER_WEEK`) real regulation — and this project's own stopping rules — impose. The number that tells the real story is touches per recovery: **Arm C needs less than half of Arm B's contact attempts** to recover a promise. An unbounded baseline can extract slightly more in a simulation that carries no real-world cost for contacting someone 15 times in 6 weeks; a compliant system can't do that, and shouldn't be scored as if it should. Full reasoning: `tracking/BUILD_LOG.md`, 2026-08-27.
+**The honest headline, not smoothed over:** Arm B recovers more nominal rupees than Arm C. It has no touch-frequency limit; Arm C is bounded by the same per-debtor contact cap (`MAX_TOUCHES_PER_WEEK`) real regulation — and this project's own stopping rules — impose, and (as of 2026-08-30) by debtor-level judgment: a dispute on one invoice now correctly freezes autonomous action on that debtor's OTHER invoices too, and a scarce weekly touch is spent on a deliberately chosen invoice (by trust and age) rather than whichever one an accident of alphabetical ordering used to favor. Arm C's own figure moved down when this landed — a real, measured trade-off (compliance and honest prioritization cost some raw recovery, the same shape of trade-off the per-debtor touch cap itself already made — see `tracking/BUILD_LOG.md`, 2026-08-30), not smoothed into a flattering number. The number that tells the real story either way is touches per recovery: **Arm C needs under half of Arm B's contact attempts** to recover a promise. An unbounded baseline can extract slightly more in a simulation that carries no real-world cost for contacting someone 15 times in 6 weeks; a compliant system can't do that, and shouldn't be scored as if it should. Full reasoning: `tracking/BUILD_LOG.md`, 2026-08-27 and 2026-08-30.
 
 **Mandate-acceptance sensitivity band, not a point estimate.** The whole thesis rests on what fraction of debtors accept a mandate offer instead of refusing it — a number this project has no real-world data for, so instead of picking one, every headline figure above is re-run across a 10%–60% acceptance range:
 
 | Target acceptance | Recovered | % of active value |
 |---|---|---|
-| 10% | ₹24,82,090 | 32.1% |
-| 20% | ₹24,82,090 | 32.1% |
-| 30% | ₹28,40,212 | 36.7% |
-| 40% | ₹23,48,197 | 30.3% |
-| 50% | ₹23,48,197 | 30.3% |
-| 60% | ₹23,48,197 | 30.3% |
+| 10% | ₹25,43,080 | 32.8% |
+| 20% | ₹21,80,422 | 28.2% |
+| 30% | ₹21,80,422 | 28.2% |
+| 40% | ₹21,80,422 | 28.2% |
+| 50% | ₹21,80,422 | 28.2% |
+| 60% | ₹21,80,422 | 28.2% |
 
-(Plateaus at adjacent targets are real, not a bug — checked directly: this heavily-gated system offers so few mandates in a 45-day run that nearby target rates can land on the same side of every RNG draw that actually fires. See `tracking/BUILD_LOG.md`.)
+(The flat band from 20%–60% is real, not a bug — checked directly: this heavily-gated, debtor-level-allocated system offers so few real mandates in a 45-day run (3, as of 2026-08-30) that most target acceptance rates land on the same side of every RNG draw that actually fires — only the 10% target draws differently. See `tracking/BUILD_LOG.md`.)
 
 ## Architecture
 
