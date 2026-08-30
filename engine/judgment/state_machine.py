@@ -36,6 +36,25 @@ MANDATE_AMOUNT_CAP = 100_000
 RETRY_ON_EXECUTION_FAILURE = 1
 MAX_ESCALATE_STAGE = 4
 HARD_STEP_CAP = 60  # termination backstop; see module docstring
+MAX_PROMISE_HORIZON_DAYS = 60
+"""Red-team packet, 2026-08-30 (`eval/red_team.py`'s "promise-farmer"
+exploit): nothing downstream of perception ever sanity-checked a promise's
+own claimed due date against a ceiling — a debtor who states an absurd
+future date (something no natural template in `sim/personas.py` produces,
+but nothing stops a real conversation, or a smarter/LLM extractor reading
+one verbatim, from producing) stays PROMISED and `_pending_promise`-excluded
+from BOTH the ordinary ladder and the idle sweep for as long as they like,
+directly defeating CLAUDE.md law 5's "every recovery path terminates"
+guarantee within any bounded observation window. `cap_promise_due_day()`
+below is the fix: a claimed date beyond this many days out is truncated to
+the ceiling, not rejected — the debtor's own words still reach the audit
+trail and the evidence a human would eventually see verbatim; only the
+SCHEDULING the system acts on refuses to treat "never" as a valid promise
+date. Chosen to comfortably exceed the escalation ladder's own longest
+legitimate cadence (`TOUCH_STAGE_BY_DAY`'s last beat is day 30) while still
+being far short of the idle sweep's own horizon (`FINAL_SWEEP_DAY` = 37),
+so a capped promise still resolves (kept or broken) before the sweep would
+otherwise have to catch it as idle."""
 
 State = Literal[
     "NEW", "TRIAGED", "ENGAGED", "PROMISED", "MANDATED", "LINKED", "AT_RISK",
@@ -193,6 +212,30 @@ def check_bounds(
             )
 
     return BoundsResult(allowed=True, reason="ok")
+
+
+def cap_promise_due_day(claimed_day: int, now_day: int) -> int:
+    """The promise-farmer mitigation (`MAX_PROMISE_HORIZON_DAYS` above,
+    2026-08-30): truncates a claimed due day to the ceiling, never further
+    out. `claimed_day`/`now_day`/the return value are all virtual-day
+    integers (the same unit `WorldRunner._due_day()` already computes in),
+    so this is a pure, trivially-testable clamp with no knowledge of
+    calendars or timezones. A `claimed_day` already inside the horizon
+    passes through completely unchanged — this never pulls a legitimate
+    near-term promise CLOSER, only refuses to push the ceiling further out."""
+    return min(claimed_day, now_day + MAX_PROMISE_HORIZON_DAYS)
+
+
+def cap_promise_due_date(claimed: dt.date, now: dt.date) -> dt.date:
+    """Same clamp as `cap_promise_due_day()`, in real calendar dates rather
+    than virtual-day integers — `Ledger._update_promise()` never sees
+    `WorldRunner`'s day-integer clock, only `dt.date`/`dt.datetime`, so it
+    needs its own unit. This is the defense-in-depth leg: any promise built
+    from a directly-injected `extraction_received` event (API call, manual
+    test event, a future real channel) gets the same ceiling as the
+    simulator's own scheduling path, even though those two call sites never
+    share a code path."""
+    return min(claimed, now + dt.timedelta(days=MAX_PROMISE_HORIZON_DAYS))
 
 
 def check_bounds_detailed(

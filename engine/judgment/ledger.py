@@ -493,10 +493,19 @@ class Ledger:
     def _update_promise(self, event_type: str, entity_id: str, debtor_id: str, entity: EntityState, payload: dict, now: dt.datetime) -> None:
         if event_type == "extraction_received":
             self._promise_seq += 1
+            raw_due = payload.get("due")
+            due = dt.date.fromisoformat(raw_due) if raw_due else now.date()
+            # Defense in depth for the promise-farmer exploit (red-team
+            # packet, 2026-08-30): `WorldRunner._due_day()` already caps the
+            # simulator's own scheduling path, but this handler is also the
+            # one any direct `extraction_received` injection (API call,
+            # manual test/replay event) goes through — cap here too so the
+            # ceiling holds regardless of who wrote the event.
+            due = state_machine.cap_promise_due_date(due, now.date())
             promise = Promise(
                 id=f"P-{self._promise_seq:04d}", debtor_id=debtor_id, invoice_id=entity_id,
                 amount_inr=payload.get("amount_inr") or entity.invoice_amount_inr or 1,
-                due=payload.get("due") or now.date(), status="pending",
+                due=due, status="pending",
                 source_msg=payload.get("message_id", ""),
             )
             self.promises[promise.id] = promise

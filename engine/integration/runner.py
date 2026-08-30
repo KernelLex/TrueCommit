@@ -119,7 +119,12 @@ from engine.action.sentinel import MAX_RETRIES, Sentinel
 from engine.action import telegram_bot, telephony, tts
 from engine.judgment import allocation, trust
 from engine.judgment.ledger import Ledger
-from engine.judgment.state_machine import MAX_TOUCHES_PER_WEEK, TERMINAL_STATES, TOUCH_WINDOW_DAYS
+from engine.judgment.state_machine import (
+    MAX_TOUCHES_PER_WEEK,
+    TERMINAL_STATES,
+    TOUCH_WINDOW_DAYS,
+    cap_promise_due_day,
+)
 from engine.perception.providers import get_provider
 from engine.schemas import Action, AuditEntry, Cart, Event, Extraction, Invoice, Message
 from sim.personas import (
@@ -732,11 +737,17 @@ class WorldRunner:
     def _due_day(self, extraction: Extraction, day: int, offset: int) -> int:
         """Prefer the date the REAL extractor read out of the message; fall
         back to the drawn offset when it read none (an L2/L3 with no explicit
-        date is exactly the case the extractor is designed to leave empty)."""
+        date is exactly the case the extractor is designed to leave empty).
+
+        Whatever comes out is passed through `cap_promise_due_day()` — the
+        red-team "promise-farmer" mitigation (state_machine.py,
+        `MAX_PROMISE_HORIZON_DAYS`). This is the operationally meaningful
+        enforcement point: it's this value, not the raw extraction, that
+        `_book_promise()` actually schedules `promise_due` against."""
         if extraction.date is not None:
             candidate = (extraction.date - SIM_EPOCH.date()).days
             if candidate > day:
-                return candidate
+                return cap_promise_due_day(candidate, day)
         return day + offset
 
     # -- promise -> instrument ----------------------------------------------

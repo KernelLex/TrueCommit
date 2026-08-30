@@ -1,5 +1,5 @@
 # PROGRESS.md — Promise Keeper build status
-### Last updated: 2026-08-30 (7-packet plan issued past the original cut order — debit-failure taxonomy [Packet 1] and debtor-level judgment [Packet 2] both done; red-team suite, acceptance learning, UI pass, live-channel demo, doc hygiene queued next, in that order) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
+### Last updated: 2026-08-30 (7-packet plan issued past the original cut order — debit-failure taxonomy [Packet 1], debtor-level judgment [Packet 2], and the adversarial red-team suite [Packet 3] all done; acceptance learning, UI pass, live-channel demo, doc hygiene queued next, in that order) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
 
 > **Handing over between Claude sessions? Read `HANDOVER.md` first** — it carries the build mechanism (three-tier orchestration), the laws, the resume procedure, and the in-flight packet specs.
 
@@ -14,8 +14,8 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 **Packet status:**
 1. ✅ **Debit-failure taxonomy** — DONE, 2026-08-30. See the dated section below for the full story.
 2. ✅ **Debtor-level judgment** — DONE, 2026-08-30. Dispute freeze + mandate-refusal posture lifted to the debtor, explicit touch-budget allocation. See the dated section below.
-3. ⏳ **Adversarial red-team suite** (4 exploit personas, quantified damage, README section) — queued next.
-4. ⏳ **Acceptance learning** (2nd Beta posterior over mandate registration, break-even number, dashboard meter) — queued.
+3. ✅ **Adversarial red-team suite** — DONE, 2026-08-30. 4 exploit personas quantified against the real `WorldRunner`; 2 mitigated (1 new — a promise-horizon cap; 1 verified as already-mitigated by Packets 1+2), 2 documented honestly as unfixable without weakening a hard bound. README section added. See the dated section below.
+4. ⏳ **Acceptance learning** (2nd Beta posterior over mandate registration, break-even number, dashboard meter) — queued next.
 5. ⏳ **UI pass** (real browser check first, then make every packet above visible on screen) — queued.
 6. ⏳ **Live channel demo path** (IVR → real mandate → Telegram confirmation; WhatsApp free-form half only, no sandbox ContentSid templates) — queued.
 7. ⏳ **Doc hygiene** (4 stale PROGRESS.md contradictions, `whatsapp_meta.py` disposition) — to be done alongside, ~20 min.
@@ -27,11 +27,11 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 - RBI E-Mandate Framework compliance: pre-debit (T-1) and post-debit notices, both live in every mandate execution.
 - Real-world integrations, opt-in and rate-limited: Razorpay TEST mode (payment links, mandate registration, full create→execute→revoke lifecycle, human-verified), Twilio voice/IVR + WhatsApp, Telegram real dispatch.
 - Dashboard: Funnel, Entity Timeline (mandate lifecycle stepper, guardrail panel), Trust Curves, Human Review queue, System Health (Sentinel + Auditor widgets) — **Packet 5 will audit whether these actually reflect everything above on screen; not re-verified in a browser since 2026-08-26 per the user's own note.**
-- 3-arm measured-vs-simulated comparison (`eval/run_arms.py` → `metrics.json`), mandate-acceptance sensitivity band, reproducibility locked at seed 42 — **Arm C's own figures moved with Packets 1 and 2** (see below), regenerated and re-verified, not just scope-note text.
-- **690/690 tests passing**, cold start verified from a fresh clone in 2 commands, no secrets in repo (grepped clean).
-- README expanded to BUILD.md's own Day-9 outline (verified stats, metrics tables, architecture diagram, real-vs-simulated table, limitations section) — **Packet 7 will fix 4 stale contradictions elsewhere in this file, not the README.**
+- 3-arm measured-vs-simulated comparison (`eval/run_arms.py` → `metrics.json`), mandate-acceptance sensitivity band, reproducibility locked at seed 42 — **Arm C's own figures moved with Packets 1 and 2** (see below), regenerated and re-verified, not just scope-note text. **Unaffected by Packet 3** — the promise-horizon cap is a true no-op under normal (non-adversarial) personas; `metrics.json` regenerated, byte-for-byte the same arm figures.
+- **704/704 tests passing**, cold start verified from a fresh clone in 2 commands, no secrets in repo (grepped clean).
+- README expanded to BUILD.md's own Day-9 outline (verified stats, metrics tables, architecture diagram, real-vs-simulated table, limitations section) — **now also carries a "How this system can be gamed and what it costs" section (Packet 3).** **Packet 7 will fix 4 stale contradictions elsewhere in this file, not the README.**
 
-**⏭ ASAP, in order:** finish the remaining 6 packets above (2 is next), THEN the pre-existing Day-9/10 items are still genuinely outstanding underneath all of this: the 30-second gif (needs a screen-recording tool this environment doesn't have), the `v1.0-freeze` tag (date-gated, Sep 1), the Day-10 submit checklist, and demo-day rehearsal (BUILD.md §6) — none of that has moved since 2026-08-29 and none of it is code.
+**⏭ ASAP, in order:** finish the remaining 4 packets above (acceptance learning is next), THEN the pre-existing Day-9/10 items are still genuinely outstanding underneath all of this: the 30-second gif (needs a screen-recording tool this environment doesn't have), the `v1.0-freeze` tag (date-gated, Sep 1), the Day-10 submit checklist, and demo-day rehearsal (BUILD.md §6) — none of that has moved since 2026-08-29 and none of it is code.
 
 ---
 
@@ -65,7 +65,27 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 
 **Tests:** `tests/test_debtor_judgment.py`, 20 new tests, pin the dispute freeze, the mandate-refusal lift, and the allocator's scoring/rotation/determinism directly. ~15 pre-existing tests across `test_integration.py`/`test_day_story.py`/`test_reminders.py`/`test_review_queue.py`/`test_debit_failure.py`/`test_run_arms.py` needed re-measured pins or a hand-driven scenario where the natural run no longer organically produces one — none weakened, each documented at its own site. 690/690 total, reproducibility re-verified byte-identical, `bound_violations()` empty. Full detail: `tracking/BUILD_LOG.md`/`DECISIONS.md`/`AI_JUDGMENT.md`/`TRACK_BAR.md` §2, all dated 2026-08-30.
 
-**Reported and stopped per the user's own instruction — Packet 3 (adversarial red-team suite) starts next, not started yet.**
+**Reported and stopped per the user's own instruction, then continued into Packet 3 on "continue".**
+
+---
+
+## Continuing development (2026-08-30) — Packet 3: adversarial red-team suite
+
+**What was built:** `eval/red_team.py` runs four systematic exploit personas — dispute-shield, promise-farmer, serial-refuser, mandate-then-revoke — against the real `WorldRunner` and quantifies each in rupees, then mitigates two and honestly documents the two that can't be fixed without weakening a hard bound. README gained a "How this system can be gamed and what it costs" section covering all four.
+
+**Mitigated 1 (new this packet): promise-farmer.** Nothing downstream of perception previously sanity-checked a promise's own claimed due date — a debtor claiming an absurd future date stayed `PROMISED` and invisible to both the ladder and the idle sweep indefinitely, a genuine gap in "every recovery path terminates." Fixed with `state_machine.MAX_PROMISE_HORIZON_DAYS = 60` (truncates, never rejects) wired into both `WorldRunner._due_day()` (the operationally meaningful scheduling path) and `Ledger._update_promise()` (defense in depth for a directly-injected event). Because the 60-day ceiling is deliberately larger than the exploit script's own 45-day snapshot, a NEW function (`run_promise_farmer_mitigation_proof`) demonstrates the fix properly: run 100 days both ways at seed 42 — **0 non-terminal with the cap, 25 non-terminal without it.**
+
+**Mitigated 2 (verified, not newly built): mandate-then-revoke.** Traced through the code before assuming anything needed to change — Packets 1+2's existing `mandate_revoked` handling already sets `entity.mandate_refused = True`, which already bars that debtor's whole portfolio from any future mandate offer. This packet's `run_mandate_then_revoke()` verifies that protection is real (5 of 5 debtors barred, max 2-day immunity window) rather than shipping a duplicate mechanism.
+
+**Investigated and found to be a genuine dead-end, reported honestly rather than forced: serial-refuser.** The plan going in was an allocation-layer refusal penalty. Tracing the actual code first: `allocation.py` only ever reorders which of ONE debtor's own invoices spends an already-fixed weekly touch budget — it structurally cannot reduce the total spent, and `debtor_mandate_refused` is one bool per debtor anyway, identical across every invoice they hold, so there's nothing within a debtor's own set to discriminate by even for reordering. The real floor is `MAX_TOUCHES_PER_WEEK` (hard bound) plus the pending-neutral refusal rule (master doc §3.2) — both explicitly off-limits to weaken. Documented as unfixable rather than shipping a no-op change to check a box. Dispute-shield is the other documented-unfixable case (the freeze IS the compliance fix; its cost is what compliance buys).
+
+**A real bug found only because a pytest test finally called this code in-process:** `run_promise_farmer()` patched `world.provider.extract` with no restore. Invisible for as long as this script only ever ran as its own fresh CLI process — but `get_provider()` memoises one provider instance per name at module scope, shared across every `WorldRunner` in the same process, so the leak corrupted `test_run_arms.py`'s pinned reconciliation (and, found by re-running rather than assuming the fix was cosmetic, had ALSO silently corrupted `run_serial_refuser()`'s own numbers even inside a single CLI invocation — corrected from 85 touches/₹0 recovered to the true 112 touches/₹44,41,598 recovered anyway). Fixed with `try/finally`.
+
+**Numbers, verified stable:** `eval/red_team.py --seed 42` run twice, JSON byte-identical. Standard 45-day run unaffected (`metrics.json` regenerated, unchanged). Two fresh 45-day runs byte-identical, `bound_violations()` empty.
+
+**Tests:** `tests/test_red_team.py` (new, 6 tests) + `tests/test_state_machine.py` (+8, the two cap functions pinned directly). 704/704 total. Full detail: `tracking/BUILD_LOG.md`/`DECISIONS.md`/`AI_JUDGMENT.md`/`TRACK_BAR.md`, all dated 2026-08-30.
+
+**Reported and stopped per the user's own instruction — Packet 4 (acceptance learning) starts next, not started yet.**
 
 ---
 

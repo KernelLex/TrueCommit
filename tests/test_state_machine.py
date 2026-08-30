@@ -481,3 +481,49 @@ def test_hard_step_cap_forces_termination_even_with_only_silent_events():
         t += dt.timedelta(days=1)
         e = sm.transition(e, "outreach_sent", {}, t)
     assert e.state in sm.TERMINAL_STATES
+
+
+# ---------------------------------------------------------------------------
+# 9. Promise-horizon cap (red-team packet, 2026-08-30) — the promise-farmer
+#    mitigation. A claimed due day/date arbitrarily far in the future must be
+#    truncated to `MAX_PROMISE_HORIZON_DAYS`, never rejected outright: the
+#    debtor's own words still reach the audit trail verbatim, only the
+#    SCHEDULING refuses to treat "never" as a valid promise date.
+# ---------------------------------------------------------------------------
+
+
+def test_cap_promise_due_day_passes_through_a_near_term_claim():
+    assert sm.cap_promise_due_day(10, now_day=3) == 10
+
+
+def test_cap_promise_due_day_truncates_a_far_future_claim():
+    assert sm.cap_promise_due_day(10_000, now_day=3) == 3 + sm.MAX_PROMISE_HORIZON_DAYS
+
+
+def test_cap_promise_due_day_is_inclusive_at_the_exact_ceiling():
+    ceiling = 3 + sm.MAX_PROMISE_HORIZON_DAYS
+    assert sm.cap_promise_due_day(ceiling, now_day=3) == ceiling
+
+
+def test_cap_promise_due_day_never_pulls_a_near_term_claim_closer():
+    """The cap is a ceiling, not a target — a promise due tomorrow must stay
+    due tomorrow, not get pushed out to the ceiling."""
+    assert sm.cap_promise_due_day(4, now_day=3) == 4
+
+
+def test_cap_promise_due_date_passes_through_a_near_term_claim():
+    now = dt.date(2026, 8, 30)
+    claimed = now + dt.timedelta(days=10)
+    assert sm.cap_promise_due_date(claimed, now) == claimed
+
+
+def test_cap_promise_due_date_truncates_a_far_future_claim():
+    now = dt.date(2026, 8, 30)
+    claimed = now + dt.timedelta(days=10_000)
+    assert sm.cap_promise_due_date(claimed, now) == now + dt.timedelta(days=sm.MAX_PROMISE_HORIZON_DAYS)
+
+
+def test_cap_promise_due_date_never_pulls_a_near_term_claim_closer():
+    now = dt.date(2026, 8, 30)
+    claimed = now + dt.timedelta(days=1)
+    assert sm.cap_promise_due_date(claimed, now) == claimed
