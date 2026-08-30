@@ -3,7 +3,7 @@
   "scope": "60 invoices / 12 debtors (data/invoices.json), Scene 1 only. No Tier-0/reserve-failover row: that mechanic is cart-only (Scene 2), out of scope here.",
   "seed": 42,
   "days": 45,
-  "generated_at": "2026-08-30T07:37:38.866831+00:00",
+  "generated_at": "2026-08-30T07:55:08.115027+00:00",
   "arms": {
     "A_silence": {
       "arm": "A_silence",
@@ -171,5 +171,12 @@
       "scope_note": "This figure is invoices only (per this report's scope), and will not match the previously-published Rs.21,92,569 whole-world figure in TRACK_BAR.md/BUILD_QUALITY.md - that figure additionally includes Scene 2/cart mechanics out of scope for this report: the 2 Tier-0 reserve-cart recoveries (Rs.1,899 + Rs.5,250 = Rs.7,149) and, since 2026-08-29, the 2 non-reserve carts that recover through a matched instrument (master doc \u00a73.3: C-05's scheduled mandate + C-07's delivery-secured mandate, Rs.2,499 + Rs.2,499 = Rs.4,998). Reconciled exactly: Rs.21,92,569 - Rs.7,149 - Rs.4,998 = Rs.21,80,422.",
       "target_mandate_acceptance_rate": 0.6
     }
-  ]
+  ],
+  "break_even_touch_efficiency": {
+    "definition": "Lowest mandate-acceptance rate in the measured sensitivity band (10%-60%) at which Arm C's touches-per-recovery is <= Arm B's blind-reminder baseline.",
+    "arm_b_touches_per_recovery": 11.26,
+    "break_even_acceptance_rate": 0.1,
+    "reached_at_every_tested_rate": true,
+    "verdict": "reached at 10% acceptance or above (band tested: 10%-60%)"
+  }
 }

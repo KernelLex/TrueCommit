@@ -107,3 +107,44 @@ def test_list_trust_matches_single_debtor_reads():
         assert row == c.get("/trust/D-02").json()
         assert row["alpha"] == 3.0  # prior 2.0 + 1 kept promise
         assert row["beta"] == 2.0
+
+
+def test_acceptance_route_starts_at_the_prior():
+    with TestClient(app) as c:
+        r = c.get("/acceptance")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["learned"]["alpha"] == 2.0
+        assert body["learned"]["beta"] == 2.0
+        assert body["learned"]["mean"] == 0.5
+        assert body["learned"]["n_total"] == 0
+        assert "break_even" in body  # present (may be null on a repo with no metrics.json yet)
+
+
+def test_acceptance_route_moves_on_a_real_mandate_confirmation():
+    with TestClient(app) as c:
+        before = c.get("/acceptance").json()["learned"]["n_accepted"]
+        c.post("/events", json={"type": "invoice_triaged", "entity_id": "INV-002", "payload": {}})
+        c.post("/events", json={"type": "extraction_received", "entity_id": "INV-002", "payload": {"amount_inr": 40000, "invoice_amount_inr": 40000}})
+        c.post("/events", json={"type": "mandate_offer_requested", "entity_id": "INV-002", "payload": {}})
+        c.post("/events", json={"type": "mandate_confirmed", "entity_id": "INV-002", "payload": {"amount_inr": 40000}})
+
+        after = c.get("/acceptance").json()["learned"]
+        assert after["n_accepted"] == before + 1
+        assert after["alpha"] == 3.0
+
+
+def test_acceptance_route_does_not_move_on_a_mandate_revoked_execution_failure():
+    """The debtor already accepted the offer to reach execution — a revoke
+    afterward is not a decline of the ORIGINAL offer (engine/judgment/
+    acceptance.py's module docstring)."""
+    with TestClient(app) as c:
+        c.post("/events", json={"type": "invoice_triaged", "entity_id": "INV-003", "payload": {}})
+        c.post("/events", json={"type": "extraction_received", "entity_id": "INV-003", "payload": {"amount_inr": 40000, "invoice_amount_inr": 40000}})
+        c.post("/events", json={"type": "mandate_offer_requested", "entity_id": "INV-003", "payload": {}})
+        c.post("/events", json={"type": "mandate_confirmed", "entity_id": "INV-003", "payload": {"amount_inr": 40000}})
+        before = c.get("/acceptance").json()["learned"]
+
+        c.post("/events", json={"type": "mandate_execute_failed", "entity_id": "INV-003", "payload": {"amount_inr": 40000, "reason": "mandate_revoked"}})
+        after = c.get("/acceptance").json()["learned"]
+        assert after == before

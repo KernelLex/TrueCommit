@@ -14,6 +14,7 @@ export default function SystemHealthScreen() {
   const { data: health, error, loading } = usePolling(() => api.health(), { intervalMs: 3000 })
   const { data: config, error: configError } = usePolling(() => api.config(), { intervalMs: 5000 })
   const { data: auditorStatus, error: auditorError } = usePolling(() => api.auditor(), { intervalMs: 5000 })
+  const { data: acceptance, error: acceptanceError } = usePolling(() => api.acceptance(), { intervalMs: 5000 })
   const online = !error && health && health.status === 'ok'
 
   const live = config?.live_status
@@ -149,6 +150,82 @@ export default function SystemHealthScreen() {
             {auditorStatus.sample_count === 0 && (
               <p className="panel-sub" style={{ margin: '0.5rem 0 0' }}>
                 No extractions sampled yet — press Advance Day to run the world forward.
+              </p>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="panel">
+        <h2>Mandate acceptance — learned vs. break-even</h2>
+        <p className="panel-sub">
+          A second, separate Beta posterior from the trust curves elsewhere in this dashboard (
+          <code>engine/judgment/acceptance.py</code>): not &quot;will this debtor keep a promise&quot;, but
+          &quot;of everyone offered a mandate, what fraction says yes&quot; — learned live, portfolio-wide, from{' '}
+          <code>GET /acceptance</code>, no decay. Compared against the break-even acceptance rate at which
+          Promise Keeper&apos;s touch-efficiency starts beating a blind-reminder baseline (
+          <code>eval/run_arms.py</code>, a Tier-2 snapshot from the last <code>python -m eval.run_arms</code> run —
+          not recomputed live).
+        </p>
+        {acceptanceError && <div className="health-error">{acceptanceError.message}</div>}
+        {acceptance && (
+          <>
+            <div className="health-stats">
+              <div>
+                <span className="health-stat-value">{Math.round(acceptance.learned.mean * 100)}%</span>
+                <span className="health-stat-label">learned acceptance rate (mean)</span>
+              </div>
+              <div>
+                <span className="health-stat-value">{acceptance.learned.n_accepted}</span>
+                <span className="health-stat-label">mandates accepted</span>
+              </div>
+              <div>
+                <span className="health-stat-value">{acceptance.learned.n_declined}</span>
+                <span className="health-stat-label">mandates declined</span>
+              </div>
+            </div>
+            {acceptance.learned.n_total === 0 && (
+              <p className="panel-sub" style={{ margin: '0.5rem 0 0' }}>
+                No mandate offer has resolved (confirmed or refused) yet — still at the Beta(2,2) prior. Press
+                Advance Day to run the world forward.
+              </p>
+            )}
+            {acceptance.break_even ? (
+              <>
+                <div className="health-row" style={{ marginTop: '0.75rem' }}>
+                  {(() => {
+                    const rate = acceptance.break_even.break_even_acceptance_rate
+                    const hasSignal = acceptance.learned.n_total > 0 && rate !== null
+                    const above = hasSignal && acceptance.learned.mean >= rate
+                    return (
+                      <>
+                        <span
+                          className={`status-dot ${
+                            !hasSignal ? 'status-dot-pending' : above ? 'status-dot-ok' : 'status-dot-down'
+                          }`}
+                        />
+                        <span className="health-status-label">
+                          {rate === null
+                            ? 'Break-even not reached anywhere in the tested 10%-60% band'
+                            : !acceptance.learned.n_total
+                            ? `Break-even threshold: ${Math.round(rate * 100)}% (no live observations yet)`
+                            : above
+                            ? `Above break-even (learned ${Math.round(acceptance.learned.mean * 100)}% ≥ threshold ${Math.round(rate * 100)}%)`
+                            : `Below break-even (learned ${Math.round(acceptance.learned.mean * 100)}% < threshold ${Math.round(rate * 100)}%)`}
+                        </span>
+                      </>
+                    )
+                  })()}
+                </div>
+                <p className="panel-sub" style={{ margin: '0.5rem 0 0' }}>
+                  {acceptance.break_even.verdict} ({acceptance.break_even.arm_b_touches_per_recovery} touches/recovery
+                  is the blind-reminder baseline this compares against).
+                </p>
+              </>
+            ) : (
+              <p className="panel-sub" style={{ margin: '0.5rem 0 0' }}>
+                No <code>metrics.json</code> found — run <code>python -m eval.run_arms</code> to compute the
+                break-even threshold.
               </p>
             )}
           </>

@@ -24,7 +24,7 @@ powershell -ExecutionPolicy Bypass -File run.ps1
 
 `setup` creates a Python venv, installs dependencies, and installs the dashboard's `node_modules`. `run` starts the API and the dashboard together. The app runs fully offline with no API keys — copy `.env.example` to `.env` and add real keys only for the live-Razorpay / real-channel demos.
 
-Run the test suite (704 tests as of this writing, fully offline):
+Run the test suite (721 tests as of this writing, fully offline):
 ```
 .venv/Scripts/python.exe -m pytest tests/   # Windows
 .venv/bin/python -m pytest tests/           # Mac/Linux
@@ -41,7 +41,7 @@ This project measures what it can and labels what it can't (CLAUDE.md's design l
 | Promise extraction accuracy (L1–L5 vs. hand labels) | **97.7%** heuristic (in-sample) · **88.6%** qwen2.5:7b | ≥85% | The heuristic number is in-sample (rules authored with the labels visible) — the honest ceiling, not a held-out estimate. The LLM number is the one that means something as a generalization claim. |
 | Root-cause triage accuracy | **91.7%** on the 24 invoices with a message thread · 71.7% across all 60 | ≥90% | Gated on threaded invoices by explicit ruling (`tracking/DECISIONS.md`) — a triage call with zero messages to read is an information-ceiling problem, not a classifier failure, and every provider tested (heuristic and two Ollama model sizes) hits the same wall on those cases. |
 | Reproducibility | Byte-identical across independent runs at seed 42 | diff = empty | Dataset generator, simulator, integration runner, and the 3-arm runner all re-verified — see `tracking/BUILD_QUALITY.md`. |
-| Test suite | **704 tests, offline by default** | — | `pytest tests/` — no network call happens unless a `PK_REAL_*` flag is explicitly opted into, with one deliberate exception: a live smoke test against a local Ollama server (skips cleanly if Ollama isn't running). |
+| Test suite | **721 tests, offline by default** | — | `pytest tests/` — no network call happens unless a `PK_REAL_*` flag is explicitly opted into, with one deliberate exception: a live smoke test against a local Ollama server (skips cleanly if Ollama isn't running). |
 
 ### Tier 2 — simulated (frozen personas, never tuned to flatter the result)
 
@@ -67,6 +67,8 @@ Same seed, same 60-invoice/12-debtor dataset, same frozen persona behavior table
 | 60% | ₹21,80,422 | 28.2% |
 
 (The flat band from 20%–60% is real, not a bug — checked directly: this heavily-gated, debtor-level-allocated system offers so few real mandates in a 45-day run (3, as of 2026-08-30) that most target acceptance rates land on the same side of every RNG draw that actually fires — only the 10% target draws differently. See `tracking/BUILD_LOG.md`.)
+
+**Break-even, not just a band.** The number that matters isn't the raw rupee figure above but touches-per-recovery (the compliance-cost metric this README leans on throughout): at what acceptance rate does offering mandates stop being worth it against just sending more reminders (Arm B, 11.26 touches/recovery)? Re-measured, not assumed: **Promise Keeper is already ahead at every tested rate, including the pessimistic 10% floor** (`metrics.json`'s `break_even_touch_efficiency`). A live, learned version of this same acceptance rate — a second, portfolio-wide Beta posterior, separate from the trust curves elsewhere in this project, updating from real `mandate_confirmed`/`mandate_refused` events as a run advances — is on the System Health dashboard screen (`engine/judgment/acceptance.py`, `GET /acceptance`). It is deliberately read-only: it does not change which instrument gets offered.
 
 ## Architecture
 

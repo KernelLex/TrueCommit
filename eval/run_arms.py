@@ -325,6 +325,53 @@ def _scaled_mandate_table(target_confirm_rate: float) -> dict:
     return scaled
 
 
+def compute_break_even_touch_efficiency(arm_b: dict, sensitivity_band: list[dict]) -> dict:
+    """The "break-even number" packet 4 (2026-08-31) asks for: the lowest
+    mandate-acceptance rate, among the already-measured sensitivity band,
+    at which Arm C's touches-per-recovery is at least as good as Arm B's
+    blind-reminder baseline — i.e. "at what learned acceptance rate does
+    offering mandates stop being a wash against just sending more
+    reminders, on TOUCH EFFICIENCY specifically" (the metric this project's
+    own README already leans on to make Arm C's case, since Arm B can
+    nominally out-recover Arm C in raw rupees within a 45-day window).
+
+    Deliberately reuses the EXISTING discrete sensitivity band
+    (`run_sensitivity_band`, 10%-60%) rather than bisecting a continuous
+    acceptance rate to find an exact crossing point. This dataset offers so
+    few real mandates in a 45-day run (single digits) that touches-per-
+    recovery is flat across most of the swept band already (see
+    `tracking/BUILD_LOG.md`/README's own sensitivity table) — a bisection
+    search would report a fake-precise crossing point on top of a small-
+    sample, largely-flat curve, which is exactly the kind of over-claimed
+    number CLAUDE.md law 8 warns against. Reporting against the band
+    actually measured is the honest version of this number.
+    """
+    target = arm_b.get("touches_per_recovery")
+    eligible = [
+        row for row in sensitivity_band
+        if row.get("touches_per_recovery") is not None and target is not None
+    ]
+    at_or_better = sorted(
+        row["target_mandate_acceptance_rate"] for row in eligible
+        if row["touches_per_recovery"] <= target
+    )
+    reached = bool(at_or_better)
+    return {
+        "definition": (
+            "Lowest mandate-acceptance rate in the measured sensitivity band "
+            "(10%-60%) at which Arm C's touches-per-recovery is <= Arm B's "
+            "blind-reminder baseline."
+        ),
+        "arm_b_touches_per_recovery": target,
+        "break_even_acceptance_rate": at_or_better[0] if reached else None,
+        "reached_at_every_tested_rate": reached and len(at_or_better) == len(eligible),
+        "verdict": (
+            f"reached at {at_or_better[0] * 100:.0f}% acceptance or above "
+            f"(band tested: 10%-60%)"
+        ) if reached else "not reached anywhere in the tested 10%-60% band",
+    }
+
+
 def run_sensitivity_band(seed: int, rates: list[float] | None = None) -> list[dict]:
     """Re-runs Arm C once per target mandate-acceptance rate. This exists
     because the headline recovery number depends on an acceptance rate this
@@ -360,6 +407,7 @@ def main(argv: list[str] | None = None) -> int:
     arm_b = run_arm_b(invoices, seed=args.seed)
     arm_c = run_arm_c(args.seed)
     sensitivity = run_sensitivity_band(args.seed)
+    break_even = compute_break_even_touch_efficiency(arm_b, sensitivity)
 
     output = {
         "tier": "Tier 2 — SIMULATED recovery against scripted, frozen personas. "
@@ -371,6 +419,7 @@ def main(argv: list[str] | None = None) -> int:
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "arms": {"A_silence": arm_a, "B_generic_reminder": arm_b, "C_promise_keeper": arm_c},
         "mandate_acceptance_sensitivity_band": sensitivity,
+        "break_even_touch_efficiency": break_even,
     }
 
     out_path = Path(args.out)
@@ -389,6 +438,8 @@ def main(argv: list[str] | None = None) -> int:
             f"  target={row['target_mandate_acceptance_rate']*100:>4.0f}%  "
             f"recovered=Rs.{row['recovered_amount_inr']:>12,} ({row['recovered_pct_by_amount']}%)"
         )
+    print(f"\nBreak-even touch efficiency (vs. Arm B, {break_even['arm_b_touches_per_recovery']} touches/recovery):")
+    print(f"  {break_even['verdict']}")
     print(f"\nWritten to {out_path}")
     return 0
 

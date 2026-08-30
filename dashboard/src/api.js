@@ -66,6 +66,11 @@ export const api = {
   // Auditor packet (2026-08-28): live rolling agreement rate, quarantine
   // state, and the drift log — master doc §7.3's "live accuracy widget".
   auditor: () => request('/auditor'),
+  // Packet 4 (2026-08-31): the live, learned, portfolio-wide mandate-
+  // acceptance posterior alongside the offline-computed break-even
+  // threshold it's read against — see System Health's "Mandate acceptance"
+  // card.
+  acceptance: () => request('/acceptance'),
   world: () => request('/world'),
 
   // ---- Packet P10: the Day Story surface --------------------------------

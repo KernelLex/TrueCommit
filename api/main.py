@@ -15,6 +15,7 @@ remains available for manual event injection in tests and demos.
 import datetime as dt
 import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
 
@@ -31,7 +32,7 @@ from engine.action.evidence import render_card
 from engine.action.razorpay_client import RazorpayError
 from engine.integration import day_story
 from engine.integration.runner import WorldRunner
-from engine.judgment import state_machine
+from engine.judgment import acceptance, state_machine
 from engine.judgment.ledger import (
     CLARIFY_CONFIDENCE_GATE,
     MANUAL_REMINDER_CHANNELS,
@@ -41,6 +42,7 @@ from engine.judgment.ledger import (
 from engine.perception import cache as perception_cache
 from engine.perception.providers.ollama import get_fallback_events
 
+ROOT = Path(__file__).resolve().parent.parent
 MAX_ADVANCE_DAYS = 365
 
 UNINJECTABLE_EVENTS = {state_machine.HUMAN_RESOLUTION_EVENT}
@@ -1349,3 +1351,50 @@ def get_auditor_status() -> dict:
     drift log. Read-only; the Auditor samples itself as extractions happen
     (`WorldRunner._audit_extraction`), nothing here triggers a sample."""
     return runner.auditor.status()
+
+
+def _load_break_even() -> dict | None:
+    """`eval/run_arms.py`'s `break_even_touch_efficiency` figure, read from
+    `metrics.json` at request time rather than recomputed here — computing
+    it live would mean re-running the 6-point sensitivity sweep (six extra
+    45-day `WorldRunner` simulations) on every dashboard poll. `metrics.json`
+    is a committed, regenerated-on-demand artifact (`python -m
+    eval.run_arms`), so this can go stale relative to the LIVE learned
+    posterior below if code changes since the last regeneration — the
+    dashboard meter labels it accordingly rather than implying it is live."""
+    path = ROOT / "metrics.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    return data.get("break_even_touch_efficiency")
+
+
+@app.get("/acceptance")
+def get_mandate_acceptance() -> dict:
+    """Packet 4 (2026-08-31): the LIVE, learned, portfolio-wide mandate-
+    acceptance Beta posterior (`engine/judgment/acceptance.py`) alongside the
+    Tier-2, offline-computed break-even threshold (`eval/run_arms.py`) it is
+    meant to be read against. Two genuinely different things reported side
+    by side, labelled as such: `learned` updates every time a mandate is
+    confirmed or refused in THIS running process; `break_even` is a snapshot
+    of the last `python -m eval.run_arms` run, not recomputed per request."""
+    now = runner.now()
+    state = ledger.current_mandate_acceptance(now)
+    return {
+        "learned": {
+            "alpha": state.alpha,
+            "beta": state.beta,
+            "mean": acceptance.mean(state),
+            **acceptance.observations(state),
+            "last_update": state.last_update,
+        },
+        "break_even": _load_break_even(),
+        "note": (
+            "`learned` is this process's own live posterior (Tier 2, simulated "
+            "personas — see CLAUDE.md law 8). `break_even` is a snapshot from "
+            "the last `python -m eval.run_arms` run, not recomputed live."
+        ),
+    }

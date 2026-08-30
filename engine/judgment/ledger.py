@@ -57,7 +57,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from engine.judgment import state_machine, trust
+from engine.judgment import acceptance, state_machine, trust
 from engine.judgment.state_machine import BoundsCheck, BoundsResult, EntityState
 from engine.schemas import Action, AuditEntry, HeldAction, Invoice, Promise, TrustState
 
@@ -214,6 +214,14 @@ class Ledger:
         self.reserve_active: dict[str, bool] = {}
         self.promises: dict[str, Promise] = {}
         self.trust: dict[str, TrustState] = {}
+        self.mandate_acceptance: TrustState | None = None
+        """Portfolio-wide, LIVE-LEARNED Beta(2,2) posterior over "does an
+        offered mandate get accepted" (packet 4, 2026-08-31) — a different
+        question from `self.trust`'s per-debtor promise-keeping posterior.
+        Lazily created (mirrors `_trust_for`'s own lazy-init pattern) via
+        `current_mandate_acceptance()`; see `engine/judgment/acceptance.py`'s
+        module docstring for why this is global rather than per-debtor and
+        never decayed."""
         self.audit: list[AuditEntry] = []
 
         self.held_actions: list[HeldAction] = []
@@ -350,6 +358,13 @@ class Ledger:
         method."""
         return self._trust_for(debtor_id, now)
 
+    def current_mandate_acceptance(self, now: dt.datetime) -> TrustState:
+        """Public, read-only view of the LIVE, learned, portfolio-wide
+        mandate-acceptance posterior (packet 4, 2026-08-31) — lazily created
+        on first read/update, never decayed (see
+        `engine/judgment/acceptance.py`'s module docstring)."""
+        return self.mandate_acceptance or acceptance.new_acceptance(now)
+
     def _audit(self, entity_id: str, layer: str, summary: str, detail: dict, ts: dt.datetime) -> AuditEntry:
         self._audit_seq += 1
         entry = AuditEntry(id=f"AE-{self._audit_seq:05d}", entity_id=entity_id, layer=layer, summary=summary, detail=detail, ts=ts)
@@ -401,6 +416,19 @@ class Ledger:
                     del self.disputed_entities_by_debtor[debtor_id]
         if new_state.mandate_refused:
             self.debtor_mandate_refused[debtor_id] = True
+
+        # Mandate-acceptance learning (packet 4, 2026-08-31) — a SEPARATE
+        # posterior from debtor trust above, see `engine/judgment/
+        # acceptance.py`'s module docstring. Keyed on the event TYPE, not on
+        # `new_state.mandate_refused` (which also flips for a `mandate_
+        # execute_failed` `mandate_revoked`/`account_closed_frozen` reason —
+        # a debtor who reaches execution already accepted the offer, so that
+        # is evidence about a different question and must not double-count
+        # here).
+        if event_type == "mandate_confirmed":
+            self.mandate_acceptance = acceptance.update_accepted(self.current_mandate_acceptance(now), now)
+        elif event_type == "mandate_refused":
+            self.mandate_acceptance = acceptance.update_declined(self.current_mandate_acceptance(now), now)
 
         self._update_trust(event_type, new_state, debtor_id, now, payload)
         self._update_promise(event_type, entity_id, debtor_id, new_state, payload, now)

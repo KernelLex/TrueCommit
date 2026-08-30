@@ -1,5 +1,5 @@
 # PROGRESS.md — Promise Keeper build status
-### Last updated: 2026-08-30 (7-packet plan issued past the original cut order — debit-failure taxonomy [Packet 1], debtor-level judgment [Packet 2], and the adversarial red-team suite [Packet 3] all done; acceptance learning, UI pass, live-channel demo, doc hygiene queued next, in that order) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
+### Last updated: 2026-08-31 (7-packet plan issued past the original cut order — debit-failure taxonomy [Packet 1], debtor-level judgment [Packet 2], the adversarial red-team suite [Packet 3], and mandate-acceptance learning [Packet 4] all done; UI pass, live-channel demo, doc hygiene queued next, in that order) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
 
 > **Handing over between Claude sessions? Read `HANDOVER.md` first** — it carries the build mechanism (three-tier orchestration), the laws, the resume procedure, and the in-flight packet specs.
 
@@ -15,8 +15,8 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 1. ✅ **Debit-failure taxonomy** — DONE, 2026-08-30. See the dated section below for the full story.
 2. ✅ **Debtor-level judgment** — DONE, 2026-08-30. Dispute freeze + mandate-refusal posture lifted to the debtor, explicit touch-budget allocation. See the dated section below.
 3. ✅ **Adversarial red-team suite** — DONE, 2026-08-30. 4 exploit personas quantified against the real `WorldRunner`; 2 mitigated (1 new — a promise-horizon cap; 1 verified as already-mitigated by Packets 1+2), 2 documented honestly as unfixable without weakening a hard bound. README section added. See the dated section below.
-4. ⏳ **Acceptance learning** (2nd Beta posterior over mandate registration, break-even number, dashboard meter) — queued next.
-5. ⏳ **UI pass** (real browser check first, then make every packet above visible on screen) — queued.
+4. ✅ **Acceptance learning** — DONE, 2026-08-31. A second, portfolio-wide Beta posterior over mandate acceptance, learned live and separate from debtor trust; a break-even acceptance-rate number derived from the existing sensitivity band (real finding: already ahead at every tested rate, 10%-60%); a live System Health dashboard meter. Deliberately read-only — does not feed any decision. See the dated section below.
+5. ⏳ **UI pass** (real browser check first, then make every packet above visible on screen) — queued next.
 6. ⏳ **Live channel demo path** (IVR → real mandate → Telegram confirmation; WhatsApp free-form half only, no sandbox ContentSid templates) — queued.
 7. ⏳ **Doc hygiene** (4 stale PROGRESS.md contradictions, `whatsapp_meta.py` disposition) — to be done alongside, ~20 min.
 
@@ -27,11 +27,12 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 - RBI E-Mandate Framework compliance: pre-debit (T-1) and post-debit notices, both live in every mandate execution.
 - Real-world integrations, opt-in and rate-limited: Razorpay TEST mode (payment links, mandate registration, full create→execute→revoke lifecycle, human-verified), Twilio voice/IVR + WhatsApp, Telegram real dispatch.
 - Dashboard: Funnel, Entity Timeline (mandate lifecycle stepper, guardrail panel), Trust Curves, Human Review queue, System Health (Sentinel + Auditor widgets) — **Packet 5 will audit whether these actually reflect everything above on screen; not re-verified in a browser since 2026-08-26 per the user's own note.**
-- 3-arm measured-vs-simulated comparison (`eval/run_arms.py` → `metrics.json`), mandate-acceptance sensitivity band, reproducibility locked at seed 42 — **Arm C's own figures moved with Packets 1 and 2** (see below), regenerated and re-verified, not just scope-note text. **Unaffected by Packet 3** — the promise-horizon cap is a true no-op under normal (non-adversarial) personas; `metrics.json` regenerated, byte-for-byte the same arm figures.
-- **704/704 tests passing**, cold start verified from a fresh clone in 2 commands, no secrets in repo (grepped clean).
-- README expanded to BUILD.md's own Day-9 outline (verified stats, metrics tables, architecture diagram, real-vs-simulated table, limitations section) — **now also carries a "How this system can be gamed and what it costs" section (Packet 3).** **Packet 7 will fix 4 stale contradictions elsewhere in this file, not the README.**
+- 3-arm measured-vs-simulated comparison (`eval/run_arms.py` → `metrics.json`), mandate-acceptance sensitivity band, reproducibility locked at seed 42 — **Arm C's own figures moved with Packets 1 and 2** (see below), regenerated and re-verified, not just scope-note text. **Unaffected by Packet 3** — the promise-horizon cap is a true no-op under normal (non-adversarial) personas; `metrics.json` regenerated, byte-for-byte the same arm figures. **Packet 4 added a new `break_even_touch_efficiency` field** to the same file (real finding: already ahead of the blind-reminder baseline at every tested rate) without moving any existing arm figure.
+- **721/721 tests passing**, cold start verified from a fresh clone in 2 commands, no secrets in repo (grepped clean).
+- README expanded to BUILD.md's own Day-9 outline (verified stats, metrics tables, architecture diagram, real-vs-simulated table, limitations section) — carries a "How this system can be gamed and what it costs" section (Packet 3). **Packet 7 will fix 4 stale contradictions elsewhere in this file, not the README.**
+- Dashboard gained a live "Mandate acceptance" meter on System Health (Packet 4) — verified end-to-end through the actual dev proxy, not yet checked visually in a browser (Packet 5's own job, per the plan).
 
-**⏭ ASAP, in order:** finish the remaining 4 packets above (acceptance learning is next), THEN the pre-existing Day-9/10 items are still genuinely outstanding underneath all of this: the 30-second gif (needs a screen-recording tool this environment doesn't have), the `v1.0-freeze` tag (date-gated, Sep 1), the Day-10 submit checklist, and demo-day rehearsal (BUILD.md §6) — none of that has moved since 2026-08-29 and none of it is code.
+**⏭ ASAP, in order:** finish the remaining 3 packets above (UI pass is next), THEN the pre-existing Day-9/10 items are still genuinely outstanding underneath all of this: the 30-second gif (needs a screen-recording tool this environment doesn't have), the `v1.0-freeze` tag (date-gated, Sep 1), the Day-10 submit checklist, and demo-day rehearsal (BUILD.md §6) — none of that has moved since 2026-08-29 and none of it is code.
 
 ---
 
@@ -85,7 +86,27 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 
 **Tests:** `tests/test_red_team.py` (new, 6 tests) + `tests/test_state_machine.py` (+8, the two cap functions pinned directly). 704/704 total. Full detail: `tracking/BUILD_LOG.md`/`DECISIONS.md`/`AI_JUDGMENT.md`/`TRACK_BAR.md`, all dated 2026-08-30.
 
-**Reported and stopped per the user's own instruction — Packet 4 (acceptance learning) starts next, not started yet.**
+**Reported and stopped per the user's own instruction, then continued into Packet 4 on "Packet 4".**
+
+---
+
+## Continuing development (2026-08-31) — Packet 4: mandate-acceptance learning
+
+**What was built, against a thin one-line spec** (the full original Packet 4 text wasn't recoverable after this session's context was compacted — only the one-line summary in this file's own packet list survived: "2nd Beta posterior over mandate registration, break-even number, dashboard meter"; interpretive calls made explicitly and logged in `tracking/DECISIONS.md` per CLAUDE.md's own convention for genuinely unspecified scope, rather than guessed silently or stopping to ask):
+
+1. **A second Beta(2,2) posterior**, `engine/judgment/acceptance.py` — portfolio-wide (not per-debtor: a per-debtor version would barely leave the prior, since most debtors get at most one mandate offer per run), never time-decayed (unlike debtor trust — this tracks a population rate over one bounded run, not per-person recency). Wired into `Ledger.process_event()` on the event TYPE (`mandate_confirmed`/`mandate_refused`), deliberately NOT on `entity.mandate_refused` the flag, because that flag also flips for a `mandate_revoked` EXECUTION failure — a debtor who reached execution already accepted the original offer, so a later revoke answers a different question and must not double-count.
+2. **A break-even number**, `eval/run_arms.py::compute_break_even_touch_efficiency()` — reuses the EXISTING 10%-60% sensitivity band (no new simulation runs) to find the lowest tested acceptance rate at which Arm C's touches-per-recovery beats Arm B's blind-reminder baseline. Real, measured finding: **already ahead at every tested rate**, including the pessimistic 10% floor.
+3. **A dashboard meter** — `GET /acceptance` (live learned posterior + the offline break-even snapshot from `metrics.json`, explicitly labelled as a snapshot not recomputed live) and a new "Mandate acceptance" card on System Health, with a status dot for above/below break-even.
+
+**Deliberately NOT wired into any decision** — the posterior is read-only/observational; it does not change which instrument gets offered or any state transition. This matches the packet's own three-item scope rather than silently expanding it (a fourth item — "use the learned rate to throttle mandate offers" — was considered and explicitly deferred; see `tracking/DECISIONS.md`).
+
+**A real environment quirk, not a code bug, found while verifying the dashboard end to end:** the Vite dev server bound to `::1` (IPv6) rather than `127.0.0.1` on this machine, so `curl`/`Invoke-WebRequest` against `127.0.0.1` both failed even though the server was genuinely up (confirmed via `Get-NetTCPConnection`). `http://[::1]:<port>/api/acceptance` reached it correctly — verified the full chain (Vite proxy → FastAPI → Ledger → JSON) and that advancing 45 days through that same proxy path moves the meter (learned mean 50% → 80%, crossing into "above break-even"). Logged in `tracking/BUILD_LOG.md` for the next session hitting the same thing.
+
+**Numbers:** purely additive — no existing decision path reads the new posterior, so nothing in any prior packet's reconciliation moved. Two fresh 45-day runs' full action/event lists AND the new posterior itself byte-identical; `bound_violations()` empty. `metrics.json` regenerated with the new `break_even_touch_efficiency` field.
+
+**Tests:** `tests/test_acceptance.py` (new, 11), `tests/test_run_arms.py` (+3), `tests/test_api.py` (+3). 721/721 total. Dashboard `npm run build`/`npm run lint` clean; full pixel-level browser check deferred to Packet 5 per the existing plan. Full detail: `tracking/BUILD_LOG.md`/`DECISIONS.md`/`AI_JUDGMENT.md`/`TRACK_BAR.md`, all dated 2026-08-31.
+
+**Reported and stopped per the user's own instruction — Packet 5 (UI pass) starts next, not started yet.**
 
 ---
 

@@ -16,6 +16,7 @@ from eval.run_arms import (
     MANDATE_ACCEPTANCE_SWEEP,
     _load_invoices,
     _scaled_mandate_table,
+    compute_break_even_touch_efficiency,
     run_arm_a,
     run_arm_b,
     run_arm_c,
@@ -123,6 +124,42 @@ def test_sensitivity_band_covers_the_required_10_to_60_percent_range():
     assert [row["target_mandate_acceptance_rate"] for row in band] == MANDATE_ACCEPTANCE_SWEEP
     # every row must be a genuine Arm C run, not a scaled copy of one figure
     assert all("recovered_amount_inr" in row for row in band)
+
+
+def test_break_even_is_reached_at_every_tested_rate_against_the_real_dataset():
+    """The real, measured finding (packet 4, 2026-08-31): Arm C's
+    touches-per-recovery already beats Arm B's blind-reminder baseline at
+    every rate in the tested 10%-60% band, including the pessimistic floor —
+    re-measured here directly, not carried forward as an assumption."""
+    arm_b = run_arm_b(_load_invoices(), seed=42)
+    band = run_sensitivity_band(seed=42)
+    result = compute_break_even_touch_efficiency(arm_b, band)
+    assert result["reached_at_every_tested_rate"] is True
+    assert result["break_even_acceptance_rate"] == MANDATE_ACCEPTANCE_SWEEP[0]
+
+
+def test_break_even_reports_not_reached_when_touches_per_recovery_never_catches_up():
+    arm_b = {"touches_per_recovery": 1.0}  # an impossibly efficient baseline
+    band = [
+        {"target_mandate_acceptance_rate": 0.10, "touches_per_recovery": 5.0},
+        {"target_mandate_acceptance_rate": 0.20, "touches_per_recovery": 4.0},
+    ]
+    result = compute_break_even_touch_efficiency(arm_b, band)
+    assert result["break_even_acceptance_rate"] is None
+    assert result["reached_at_every_tested_rate"] is False
+    assert "not reached" in result["verdict"]
+
+
+def test_break_even_picks_the_lowest_crossing_rate_not_the_first_row():
+    arm_b = {"touches_per_recovery": 6.0}
+    band = [
+        {"target_mandate_acceptance_rate": 0.10, "touches_per_recovery": 8.0},  # worse than Arm B
+        {"target_mandate_acceptance_rate": 0.20, "touches_per_recovery": 5.0},  # crosses here
+        {"target_mandate_acceptance_rate": 0.30, "touches_per_recovery": 4.0},
+    ]
+    result = compute_break_even_touch_efficiency(arm_b, band)
+    assert result["break_even_acceptance_rate"] == 0.20
+    assert result["reached_at_every_tested_rate"] is False  # not the 10% row
 
 
 def test_scaled_mandate_table_never_exceeds_valid_probabilities():
