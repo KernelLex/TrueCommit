@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from engine import config as agent_config
-from engine.action import razorpay_client, telegram_bot, telephony, tts
+from engine.action import razorpay_client, telegram_bot, telephony, tts, whatsapp_meta
 from engine.action.contacts import ContactError
 from engine.action.evidence import render_card
 from engine.action.razorpay_client import RazorpayError
@@ -918,25 +918,50 @@ async def telephony_ivr_response(entity_id: str, request: Request) -> Response:
     # The Razorpay object existing is not the same as the debtor HAVING the
     # link — earlier live testing found the spoken "check your messages"
     # promise was never backed by an actual send (tracking/BUILD_LOG.md,
-    # 2026-08-28). Same real-dispatch gate as the call itself
-    # (`real_telephony_contact`): opt-in, credential, real submitted contact.
-    # Falls back to an honest spoken line, never a false promise, when a real
-    # send isn't possible (e.g. this number never joined the Twilio WhatsApp
-    # sandbox) or fails.
-    real_contact = runner.real_telephony_contact(entity_id)
-    if real_contact:
+    # 2026-08-28). Same real-dispatch GATE SHAPE as the call itself (opt-in,
+    # credential, real submitted contact), but two independently-toggleable
+    # CHANNELS now (packet 6): Meta's direct API is tried FIRST when
+    # configured, because it is genuine free-form content sent without
+    # Twilio's WhatsApp Sandbox `ContentSid Required` wall in the way (see
+    # `engine/action/whatsapp_meta.py`'s module docstring) — Twilio's own
+    # `send_whatsapp` is the fallback, unchanged from before, for a setup
+    # that only has Twilio configured. Either way, this falls back to an
+    # honest spoken line, never a false promise, when no real send is
+    # possible or the attempt fails.
+    meta_contact = runner.real_whatsapp_meta_contact(entity_id)
+    twilio_contact = runner.real_telephony_contact(entity_id)
+    if meta_contact:
         try:
-            wa_result = telephony.send_whatsapp(real_contact, message_text)
+            wa_result = whatsapp_meta.send_text(meta_contact, message_text)
+        except whatsapp_meta.WhatsAppError as exc:
+            runner.audit_manual(
+                entity_id, "IVR: real WhatsApp (Meta) confirmation FAILED (link/mandate still created)",
+                {"kind": kind, "contact": meta_contact, "error": str(exc)},
+            )
+            confirm_text = "Your confirmation link could not be messaged to you — please contact support."
+        else:
+            runner.audit_manual(
+                entity_id, "IVR: real WhatsApp (Meta) confirmation sent",
+                {"kind": kind, "contact": meta_contact, "message_id": wa_result["message_id"]},
+            )
+            confirm_text = (
+                "Your automatic payment has been set up. A confirmation message is on its way."
+                if kind == "mandate_offer" else
+                "A payment link has been sent to your WhatsApp."
+            )
+    elif twilio_contact:
+        try:
+            wa_result = telephony.send_whatsapp(twilio_contact, message_text)
         except telephony.TelephonyError as exc:
             runner.audit_manual(
                 entity_id, "IVR: real WhatsApp confirmation FAILED (link/mandate still created)",
-                {"kind": kind, "contact": real_contact, "error": str(exc)},
+                {"kind": kind, "contact": twilio_contact, "error": str(exc)},
             )
             confirm_text = "Your confirmation link could not be messaged to you — please contact support."
         else:
             runner.audit_manual(
                 entity_id, "IVR: real WhatsApp confirmation sent",
-                {"kind": kind, "contact": real_contact, "whatsapp_sid": wa_result["sid"]},
+                {"kind": kind, "contact": twilio_contact, "whatsapp_sid": wa_result["sid"]},
             )
             confirm_text = (
                 "Your automatic payment has been set up. A confirmation message is on its way."

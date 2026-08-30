@@ -17,8 +17,8 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 3. ✅ **Adversarial red-team suite** — DONE, 2026-08-30. 4 exploit personas quantified against the real `WorldRunner`; 2 mitigated (1 new — a promise-horizon cap; 1 verified as already-mitigated by Packets 1+2), 2 documented honestly as unfixable without weakening a hard bound. README section added. See the dated section below.
 4. ✅ **Acceptance learning** — DONE. A second, portfolio-wide Beta posterior over mandate acceptance, learned live and separate from debtor trust; a break-even acceptance-rate number derived from the existing sensitivity band (real finding: already ahead at every tested rate, 10%-60%); a live System Health dashboard meter. Deliberately read-only — does not feed any decision. See the dated section below.
 5. ✅ **UI pass** — DONE, 2026-08-30. First genuine visual browser check this project has had (Playwright/Chromium, installed as a session tool, not a project dependency) — all six screens confirmed rendering real data with zero JS errors, including Packet 4's new meter. Found and fixed one real gap while looking: the mandate lifecycle stepper was dropping the debit-failure reason (Packet 1's whole taxonomy) on the floor. See the dated section below.
-6. ⏳ **Live channel demo path** (IVR → real mandate → Telegram confirmation; WhatsApp free-form half only, no sandbox ContentSid templates) — queued next.
-7. ⏳ **Doc hygiene** (4 stale PROGRESS.md contradictions, `whatsapp_meta.py` disposition) — to be done alongside, ~20 min.
+6. 🟡 **Live channel demo path** — engineering DONE, 2026-08-30; the actual live phone/WhatsApp run (needs a real number and the user's own reply to open a WhatsApp session) has not happened yet. Found `engine/action/whatsapp_meta.py` already fully written but uncommitted and unwired from a prior session; finished it — wired its free-form send (`send_text`) as the PREFERRED real WhatsApp channel in the IVR confirmation flow (tried before Twilio, which stays as an unmodified fallback), left the template half (`send_template`) unwired per the packet's own "free-form half only" instruction, and gave it its first-ever test coverage (13 new tests + 4 in `test_ivr.py`). See the dated section below.
+7. ⏳ **Doc hygiene** (4 stale PROGRESS.md contradictions, `whatsapp_meta.py` disposition — now resolved as part of Packet 6, see below) — to be done alongside, ~20 min.
 
 **✅ Done before this plan (all tested, tracked, pushed) — still true, unaffected by the packets above except where noted:**
 - Full Scene 1 pipeline: triage → extraction (85%/90% accuracy gates cleared on 2 providers) → trust → state machine (all 8 bounds) → mandate/link conversion → escalation ladder → human handoff/dispute — **now includes the debit-failure taxonomy's reason-aware routing, Packet 1.**
@@ -123,7 +123,21 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 
 **Tests:** `tests/test_day_story.py` +1. 722/722 total. Full detail: `tracking/BUILD_LOG.md`/`BUILD_QUALITY.md`/`TRACK_BAR.md`, all dated 2026-08-30.
 
-**Reported and stopped per the user's own instruction — Packet 6 (live channel demo path) starts next, not started yet.**
+**Reported and stopped per the user's own instruction, then continued into Packet 6 on "continue".**
+
+---
+
+## Continuing development (2026-08-30) — Packet 6: live channel demo path
+
+**Found before building anything:** `engine/action/whatsapp_meta.py` was already sitting in the working tree, fully written, dated 2026-08-27 in its own docstring — Meta's direct WhatsApp Cloud API, built specifically to route around the real `ContentSid Required` wall the Twilio WhatsApp Sandbox path hit that same day. It had never been committed to git and had zero callers anywhere. Read in full before changing anything.
+
+**What was built:** wired only the FREE-FORM half (`send_text()`) into the IVR confirmation flow, per the packet's own literal instruction — never `send_template()`, which stays in the module unwired. `WorldRunner` gained `PK_REAL_WHATSAPP_META` (its own independent opt-in flag, matching the `PK_REAL_TELEGRAM` precedent) and `real_whatsapp_meta_contact()` — the same three-condition real-dispatch gate every other channel uses. `api/main.py`'s IVR confirmation now tries Meta-direct first when configured, falling back to the existing, completely unmodified Twilio path otherwise, so a Twilio-only setup behaves exactly as before. Gave the module its first-ever tests: 13 in a new `tests/test_whatsapp_meta.py`, plus 4 more in `tests/test_ivr.py` covering the gate and the Meta-preferred-over-Twilio fallback logic — including the same "full seeded 45-day run can never reach this channel even with the flag on" proof every other real-dispatch channel in this project carries.
+
+**What has NOT happened yet, stated plainly:** the actual LIVE run — a real phone ringing, a real mandate/link created, a real WhatsApp/Telegram message landing on an actual phone. That needs a real phone number and the recipient's own reply (to open a genuine WhatsApp session for the free-form send to have a chance of succeeding), which is the user's call to make, not something to trigger unprompted. The IVR call → real mandate → Telegram confirmation half of this flow was already live-verified in earlier sessions (Track A, packets P16/P17); what's newly built and NOT yet live-verified is specifically the Meta WhatsApp free-form send.
+
+**Numbers:** unaffected — new manual-only code path, no autonomous call site. Two fresh 45-day runs byte-identical; `bound_violations()` empty.
+
+**Tests:** `tests/test_whatsapp_meta.py` (new, 13) + `tests/test_ivr.py` (+4). 739/739 total. Full detail: `tracking/BUILD_LOG.md`/`DECISIONS.md`/`AI_JUDGMENT.md`/`TRACK_BAR.md`/`BUILD_QUALITY.md`, all dated 2026-08-30.
 
 ---
 

@@ -116,7 +116,7 @@ from engine.action.evidence import build_evidence_packet
 from engine.action.messenger import Messenger, Rail
 from engine.action.razorpay_client import RazorpayError
 from engine.action.sentinel import MAX_RETRIES, Sentinel
-from engine.action import telegram_bot, telephony, tts
+from engine.action import telegram_bot, telephony, tts, whatsapp_meta
 from engine.judgment import allocation, trust
 from engine.judgment.ledger import Ledger
 from engine.judgment.state_machine import (
@@ -358,6 +358,24 @@ def _real_telegram_enabled() -> bool:
     return os.environ.get(ENV_REAL_TELEGRAM, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+ENV_REAL_WHATSAPP_META = "PK_REAL_WHATSAPP_META"
+
+
+def _real_whatsapp_meta_enabled() -> bool:
+    """OPT-IN (packet 6, live channel demo path), same reasoning as
+    `PK_REAL_TELEPHONY`/`PK_REAL_TELEGRAM`: a real WhatsApp send genuinely
+    reaches a real person, so it needs an explicit ask even when Meta's
+    credentials (`META_WHATSAPP_ACCESS_TOKEN`/`META_WHATSAPP_PHONE_NUMBER_ID`)
+    are present. Its own flag, not folded into `PK_REAL_TELEPHONY`, for the
+    same reason `PK_REAL_TELEGRAM` got its own: each real-dispatch channel
+    stays independently toggleable. See `engine/action/whatsapp_meta.py`'s
+    module docstring for why this channel exists at all (Twilio's WhatsApp
+    Sandbox hit a real `ContentSid Required` wall outside a live session;
+    going direct to Meta removes the reseller layer, not the underlying
+    WhatsApp rule)."""
+    return os.environ.get(ENV_REAL_WHATSAPP_META, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 class WorldRunner:
     """Owns the virtual day counter, the Ledger, the Messenger, the Sentinel,
     the seeded rng and the perception provider — i.e. one whole world.
@@ -377,6 +395,7 @@ class WorldRunner:
         real_tts: bool | None = None,
         real_telephony: bool | None = None,
         real_telegram: bool | None = None,
+        real_whatsapp_meta: bool | None = None,
     ) -> None:
         self.seed = seed
         self.rng = random.Random(seed)
@@ -411,6 +430,12 @@ class WorldRunner:
         ALLOWED to be attempted (packet P17). Same shape as `real_telephony`:
         autonomous actions can never reach a real Telegram send regardless of
         this flag; see `_should_go_real_telegram()`."""
+        self.real_whatsapp_meta = _real_whatsapp_meta_enabled() if real_whatsapp_meta is None else real_whatsapp_meta
+        """Reflects `PK_REAL_WHATSAPP_META` — whether a real Meta-direct
+        WhatsApp send is even ALLOWED to be attempted (packet 6). Same shape
+        as `real_telephony`/`real_telegram`: autonomous actions can never
+        reach a real send regardless of this flag; see
+        `real_whatsapp_meta_contact()`."""
 
         self.day = 0
         self.events: list[Event] = []
@@ -1801,6 +1826,28 @@ class WorldRunner:
         if not self.real_telephony:
             return None
         if not telephony.is_configured():
+            return None
+        resolved = self.resolve_contact(entity_id)
+        if resolved["source"] != "operator_submitted":
+            return None
+        return resolved["contact"]
+
+    def real_whatsapp_meta_contact(self, entity_id: str) -> str | None:
+        """Same three conditions as `real_telephony_contact()` above, for the
+        Meta-direct WhatsApp channel (packet 6): explicit opt-in
+        (`PK_REAL_WHATSAPP_META=1`), Meta credentials actually present
+        (`whatsapp_meta.is_configured()`), and a real operator-submitted
+        contact — never the synthetic demo number. Kept as its own method
+        (rather than a parameter on `real_telephony_contact`) because the two
+        channels are independently toggleable and independently configured;
+        a caller wanting "is there ANY way to reach this debtor for real"
+        checks both, preferring this one first (see `api/main.py`'s IVR
+        confirmation handler — Meta is the preferred channel where
+        configured, precisely to avoid the Twilio Sandbox `ContentSid
+        Required` wall this module's own docstring documents)."""
+        if not self.real_whatsapp_meta:
+            return None
+        if not whatsapp_meta.is_configured():
             return None
         resolved = self.resolve_contact(entity_id)
         if resolved["source"] != "operator_submitted":

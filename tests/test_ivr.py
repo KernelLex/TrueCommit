@@ -37,7 +37,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
-from engine.action import razorpay_client, telephony
+from engine.action import razorpay_client, telephony, whatsapp_meta
 from engine.action.razorpay_client import RazorpayError
 from engine.integration.runner import WorldRunner
 from engine.judgment.ledger import Ledger, ReviewQueueError
@@ -530,6 +530,122 @@ def test_real_telephony_contact_requires_all_three_conditions(monkeypatch):
     assert fresh.real_telephony_contact("INV-001") is None, "no real submitted contact"
 
     assert world.real_telephony_contact("INV-001") == "9611550053"
+
+
+def test_real_whatsapp_meta_contact_requires_all_three_conditions(monkeypatch):
+    """Same three-condition shape as `real_telephony_contact` above, for the
+    Meta-direct channel (packet 6) — its own independent flag/credential,
+    same 'never the synthetic demo contact' rule."""
+    world = WorldRunner(real_razorpay=False, real_tts=False, real_whatsapp_meta=False)
+    monkeypatch.setattr(whatsapp_meta, "is_configured", lambda: True)
+    world.contacts.submit(world._contact_key("INV-001"), "Amogh", "9611550053", NOW)
+    assert world.real_whatsapp_meta_contact("INV-001") is None, "opt-in flag is off"
+
+    world.real_whatsapp_meta = True
+    monkeypatch.setattr(whatsapp_meta, "is_configured", lambda: False)
+    assert world.real_whatsapp_meta_contact("INV-001") is None, "no working credential"
+
+    monkeypatch.setattr(whatsapp_meta, "is_configured", lambda: True)
+    fresh = WorldRunner(real_razorpay=False, real_tts=False, real_whatsapp_meta=True)
+    assert fresh.real_whatsapp_meta_contact("INV-001") is None, "no real submitted contact"
+
+    assert world.real_whatsapp_meta_contact("INV-001") == "9611550053"
+
+
+# ---------------------------------------------------------------------------
+# 5. IVR confirmation: Meta-direct is preferred over Twilio when both are
+#    configured (packet 6) — the whole point of building it was to avoid
+#    Twilio's WhatsApp Sandbox `ContentSid Required` wall.
+# ---------------------------------------------------------------------------
+
+
+def test_ivr_response_prefers_meta_whatsapp_over_twilio_when_both_are_configured(client, monkeypatch):
+    from api.main import runner as live_runner
+
+    live_runner.real_whatsapp_meta = True
+    live_runner.real_telephony = True
+    monkeypatch.setattr(whatsapp_meta, "is_configured", lambda: True)
+    monkeypatch.setattr(telephony, "is_configured", lambda: True)
+    client.post("/entities/INV-001/contact", json={"name": "Amogh", "phone": "9611550053"})
+
+    monkeypatch.setattr(
+        razorpay_client, "create_payment_link",
+        lambda *a, **k: {"id": "plink_TEST", "short_url": "https://rzp.io/rzp/LINK"},
+    )
+    meta_calls, twilio_calls = [], []
+    monkeypatch.setattr(
+        whatsapp_meta, "send_text",
+        lambda to, text: meta_calls.append((to, text)) or {"message_id": "wamid.TEST", "to": to},
+    )
+    monkeypatch.setattr(telephony, "send_whatsapp", lambda *a, **k: twilio_calls.append(a))
+
+    r = client.post("/telephony/ivr-response", params={"entity_id": "INV-001"}, data={"Digits": "2"})
+    assert r.status_code == 200
+    assert "sent to your WhatsApp" in r.text
+    assert len(meta_calls) == 1
+    assert twilio_calls == [], "Twilio must not be tried when Meta's gate already allowed a real send"
+
+    from api.main import ledger as live_ledger
+    entries = [a for a in live_ledger.audit if a.entity_id == "INV-001" and "real WhatsApp (Meta) confirmation sent" in a.summary]
+    assert len(entries) == 1
+    assert entries[0].detail["message_id"] == "wamid.TEST"
+
+
+def test_ivr_response_falls_back_to_twilio_when_meta_is_not_configured(client, monkeypatch):
+    """Backward-compatibility proof: a setup with only Twilio configured (the
+    only shape that existed before packet 6) behaves exactly as it always
+    did — this is the same scenario `test_ivr_response_sends_a_real_whatsapp_confirmation_when_the_gate_allows_it`
+    already pins; this test only adds the explicit 'Meta gate is closed'
+    precondition so the fallback branch itself is what's under test."""
+    from api.main import runner as live_runner
+
+    live_runner.real_whatsapp_meta = False  # Meta never opted into
+    live_runner.real_telephony = True
+    monkeypatch.setattr(telephony, "is_configured", lambda: True)
+    client.post("/entities/INV-001/contact", json={"name": "Amogh", "phone": "9611550053"})
+
+    monkeypatch.setattr(
+        razorpay_client, "create_payment_link",
+        lambda *a, **k: {"id": "plink_TEST", "short_url": "https://rzp.io/rzp/LINK"},
+    )
+    twilio_calls = []
+    monkeypatch.setattr(
+        telephony, "send_whatsapp",
+        lambda to, text: twilio_calls.append((to, text)) or {"sid": "SMxxxx", "status": "queued", "to": to, "from": "whatsapp:+14155238886"},
+    )
+
+    r = client.post("/telephony/ivr-response", params={"entity_id": "INV-001"}, data={"Digits": "2"})
+    assert r.status_code == 200
+    assert len(twilio_calls) == 1
+
+
+def test_ivr_response_meta_whatsapp_failure_is_audited_not_swallowed(client, monkeypatch):
+    from api.main import runner as live_runner
+
+    live_runner.real_whatsapp_meta = True
+    monkeypatch.setattr(whatsapp_meta, "is_configured", lambda: True)
+    client.post("/entities/INV-001/contact", json={"name": "Amogh", "phone": "9611550053"})
+    monkeypatch.setattr(
+        razorpay_client, "create_payment_link",
+        lambda *a, **k: {"id": "plink_TEST", "short_url": "https://rzp.io/rzp/LINK"},
+    )
+
+    def _boom(to, text):
+        raise whatsapp_meta.WhatsAppError("more than 24 hours have passed since the customer last replied")
+
+    monkeypatch.setattr(whatsapp_meta, "send_text", _boom)
+
+    r = client.post("/telephony/ivr-response", params={"entity_id": "INV-001"}, data={"Digits": "2"})
+    assert r.status_code == 200
+    assert "could not be messaged" in r.text
+
+    from api.main import ledger as live_ledger
+    entries = [a for a in live_ledger.audit if a.entity_id == "INV-001" and "WhatsApp (Meta) confirmation FAILED" in a.summary]
+    assert len(entries) == 1
+    assert "24 hours" in entries[0].detail["error"]
+    # the Razorpay object itself is unaffected by the confirmation failing
+    created = [a for a in live_ledger.audit if a.entity_id == "INV-001" and "IVR: link created" in a.summary]
+    assert len(created) == 1
 
 
 # ---------------------------------------------------------------------------
