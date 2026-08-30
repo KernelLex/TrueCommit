@@ -358,7 +358,18 @@ def _mandate_step(entry: AuditEntry) -> tuple[str, dict] | None:
         if event == "mandate_execute_success":
             return "executed", {"transition": summary, "amount_inr": (detail.get("payload") or {}).get("amount_inr")}
         if event == "mandate_execute_failed":
-            return "execute_failed", {"transition": summary, "amount_inr": (detail.get("payload") or {}).get("amount_inr")}
+            payload = detail.get("payload") or {}
+            # `reason` is the whole point of the debit-failure taxonomy
+            # (packet 1, 2026-08-30): insufficient_funds/bank_downtime/
+            # mandate_revoked/account_closed_frozen/amount_exceeds_limit each
+            # get materially different treatment (retry vs. escalate vs.
+            # fall back), and only `mandate_revoked` is a real willingness
+            # signal. Surfaced the same way `debtor_refused` above already
+            # surfaces ITS reason — before this fix, `execute_failed` was the
+            # one mandate-lifecycle step that dropped its reason on the
+            # floor, even though the frontend's renderer already handles any
+            # step's `detail.reason` generically.
+            return "execute_failed", {"transition": summary, "amount_inr": payload.get("amount_inr"), "reason": payload.get("reason")}
         if event == "delivery_rejected":
             return "revoked", {"transition": summary}
         return None

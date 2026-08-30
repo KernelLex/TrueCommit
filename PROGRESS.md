@@ -1,5 +1,5 @@
 # PROGRESS.md — Promise Keeper build status
-### Last updated: 2026-08-31 (7-packet plan issued past the original cut order — debit-failure taxonomy [Packet 1], debtor-level judgment [Packet 2], the adversarial red-team suite [Packet 3], and mandate-acceptance learning [Packet 4] all done; UI pass, live-channel demo, doc hygiene queued next, in that order) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
+### Last updated: 2026-08-30 (7-packet plan issued past the original cut order — debit-failure taxonomy [Packet 1], debtor-level judgment [Packet 2], the adversarial red-team suite [Packet 3], mandate-acceptance learning [Packet 4], and the UI pass [Packet 5] all done; live-channel demo, doc hygiene queued next, in that order) · Repo: github.com/KernelLex/TrueCommit · Freeze: Sep 1 · Submit: Sep 5
 
 > **Handing over between Claude sessions? Read `HANDOVER.md` first** — it carries the build mechanism (three-tier orchestration), the laws, the resume procedure, and the in-flight packet specs.
 
@@ -15,9 +15,9 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 1. ✅ **Debit-failure taxonomy** — DONE, 2026-08-30. See the dated section below for the full story.
 2. ✅ **Debtor-level judgment** — DONE, 2026-08-30. Dispute freeze + mandate-refusal posture lifted to the debtor, explicit touch-budget allocation. See the dated section below.
 3. ✅ **Adversarial red-team suite** — DONE, 2026-08-30. 4 exploit personas quantified against the real `WorldRunner`; 2 mitigated (1 new — a promise-horizon cap; 1 verified as already-mitigated by Packets 1+2), 2 documented honestly as unfixable without weakening a hard bound. README section added. See the dated section below.
-4. ✅ **Acceptance learning** — DONE, 2026-08-31. A second, portfolio-wide Beta posterior over mandate acceptance, learned live and separate from debtor trust; a break-even acceptance-rate number derived from the existing sensitivity band (real finding: already ahead at every tested rate, 10%-60%); a live System Health dashboard meter. Deliberately read-only — does not feed any decision. See the dated section below.
-5. ⏳ **UI pass** (real browser check first, then make every packet above visible on screen) — queued next.
-6. ⏳ **Live channel demo path** (IVR → real mandate → Telegram confirmation; WhatsApp free-form half only, no sandbox ContentSid templates) — queued.
+4. ✅ **Acceptance learning** — DONE. A second, portfolio-wide Beta posterior over mandate acceptance, learned live and separate from debtor trust; a break-even acceptance-rate number derived from the existing sensitivity band (real finding: already ahead at every tested rate, 10%-60%); a live System Health dashboard meter. Deliberately read-only — does not feed any decision. See the dated section below.
+5. ✅ **UI pass** — DONE, 2026-08-30. First genuine visual browser check this project has had (Playwright/Chromium, installed as a session tool, not a project dependency) — all six screens confirmed rendering real data with zero JS errors, including Packet 4's new meter. Found and fixed one real gap while looking: the mandate lifecycle stepper was dropping the debit-failure reason (Packet 1's whole taxonomy) on the floor. See the dated section below.
+6. ⏳ **Live channel demo path** (IVR → real mandate → Telegram confirmation; WhatsApp free-form half only, no sandbox ContentSid templates) — queued next.
 7. ⏳ **Doc hygiene** (4 stale PROGRESS.md contradictions, `whatsapp_meta.py` disposition) — to be done alongside, ~20 min.
 
 **✅ Done before this plan (all tested, tracked, pushed) — still true, unaffected by the packets above except where noted:**
@@ -30,9 +30,10 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 - 3-arm measured-vs-simulated comparison (`eval/run_arms.py` → `metrics.json`), mandate-acceptance sensitivity band, reproducibility locked at seed 42 — **Arm C's own figures moved with Packets 1 and 2** (see below), regenerated and re-verified, not just scope-note text. **Unaffected by Packet 3** — the promise-horizon cap is a true no-op under normal (non-adversarial) personas; `metrics.json` regenerated, byte-for-byte the same arm figures. **Packet 4 added a new `break_even_touch_efficiency` field** to the same file (real finding: already ahead of the blind-reminder baseline at every tested rate) without moving any existing arm figure.
 - **721/721 tests passing**, cold start verified from a fresh clone in 2 commands, no secrets in repo (grepped clean).
 - README expanded to BUILD.md's own Day-9 outline (verified stats, metrics tables, architecture diagram, real-vs-simulated table, limitations section) — carries a "How this system can be gamed and what it costs" section (Packet 3). **Packet 7 will fix 4 stale contradictions elsewhere in this file, not the README.**
-- Dashboard gained a live "Mandate acceptance" meter on System Health (Packet 4) — verified end-to-end through the actual dev proxy, not yet checked visually in a browser (Packet 5's own job, per the plan).
+- Dashboard gained a live "Mandate acceptance" meter on System Health (Packet 4) — **now visually confirmed in a real browser (Packet 5)**, rendering correctly alongside all five other screens.
+- **First real browser verification this project has had** (Packet 5, 2026-08-30): headless Chromium via Playwright, all six dashboard screens screenshotted with zero JS errors. Found and fixed one real gap: the mandate lifecycle stepper wasn't surfacing the debit-failure reason (Packet 1), even though the frontend already had generic rendering for it — one-line backend fix.
 
-**⏭ ASAP, in order:** finish the remaining 3 packets above (UI pass is next), THEN the pre-existing Day-9/10 items are still genuinely outstanding underneath all of this: the 30-second gif (needs a screen-recording tool this environment doesn't have), the `v1.0-freeze` tag (date-gated, Sep 1), the Day-10 submit checklist, and demo-day rehearsal (BUILD.md §6) — none of that has moved since 2026-08-29 and none of it is code.
+**⏭ ASAP, in order:** finish the remaining 2 packets above (live channel demo is next), THEN the pre-existing Day-9/10 items are still genuinely outstanding underneath all of this: the 30-second gif (needs a screen-recording tool this environment doesn't have), the `v1.0-freeze` tag (date-gated, Sep 1), the Day-10 submit checklist, and demo-day rehearsal (BUILD.md §6) — none of that has moved since 2026-08-29 and none of it is code.
 
 ---
 
@@ -106,7 +107,23 @@ The one-page answer to "where are we?". Detail lives in `tracking/` (BUILD_LOG =
 
 **Tests:** `tests/test_acceptance.py` (new, 11), `tests/test_run_arms.py` (+3), `tests/test_api.py` (+3). 721/721 total. Dashboard `npm run build`/`npm run lint` clean; full pixel-level browser check deferred to Packet 5 per the existing plan. Full detail: `tracking/BUILD_LOG.md`/`DECISIONS.md`/`AI_JUDGMENT.md`/`TRACK_BAR.md`, all dated 2026-08-31.
 
-**Reported and stopped per the user's own instruction — Packet 5 (UI pass) starts next, not started yet.**
+**Reported and stopped per the user's own instruction, then continued into Packet 5 on "continue".**
+
+---
+
+## Continuing development (2026-08-30) — Packet 5: UI pass
+
+**Part 1 — a real browser check, for the first time this project has had one.** Every prior UI-touching packet logged the same limitation: "no screenshot/browser tool available this session." Installed Playwright's Chromium (`npx playwright@latest install chromium`) as a session-local verification tool — not a project dependency, no `package.json`/lockfile change anywhere in the repo. Started the real API and Vite dev server, drove a headless Chromium through the actual app (load → "Run to Day 45" → click through all six sidebar tabs), screenshotting each and watching for JS errors the whole time. Result: **zero console/page errors, all six screens render real, correct data** — Trust Curves' 21 per-debtor Beta curves, the Funnel's pinned recovery figure, the Human Review queue's held actions and open handoffs, and Packet 4's new "Mandate acceptance" card (confirmed live: 80% learned rate, "Above break-even"). A real environment quirk (Vite binds `::1` not `127.0.0.1` on this machine) needed `http://[::1]:<port>` to reach directly with `curl`/PowerShell — a real browser resolves `localhost` the same way already, so this only affected the CLI verification step, not an actual person using the dashboard.
+
+**Part 2 — make every packet above visible, and a real gap found by looking.** `engine/integration/day_story.py::_mandate_step()`'s `mandate_execute_failed` case never surfaced the debit-failure `reason` — the entire point of Packet 1's taxonomy (insufficient_funds/bank_downtime/mandate_revoked/account_closed_frozen/amount_exceeds_limit, each treated differently) — even though its sibling `mandate_refused` case already did, and the frontend already renders any step's `detail.reason` generically. A judge looking at the mandate lifecycle stepper would see "execute_failed" and an amount, never why. Fixed with a one-line change mirroring the working sibling case. Not reproducible visually in this run's own seed (0 execution failures fire in it), so verified with a direct unit test constructing the audit entry by hand — same approach Packet 1's own original tests already needed for 3 of its 5 reasons.
+
+**Checked and found already adequately visible, no fix needed:** Packet 2's debtor-level dispute freeze/mandate-refusal posture write plain-English audit summaries the existing generic renderer already surfaces. Packet 3 (red-team) is a separate Tier-2 adversarial analysis outside the live demo's frozen personas by design — its visible surface is the README section built for it, not a dashboard screen; adding one would misrepresent an adversarial-worst-case simulation as part of the interactive demo.
+
+**Numbers:** unchanged — a read-model fix only. Two fresh 45-day runs byte-identical, `bound_violations()` empty.
+
+**Tests:** `tests/test_day_story.py` +1. 722/722 total. Full detail: `tracking/BUILD_LOG.md`/`BUILD_QUALITY.md`/`TRACK_BAR.md`, all dated 2026-08-30.
+
+**Reported and stopped per the user's own instruction — Packet 6 (live channel demo path) starts next, not started yet.**
 
 ---
 

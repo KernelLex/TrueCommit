@@ -212,6 +212,29 @@ def test_mandate_timeline_reconstructs_the_lifecycle_from_the_audit_trail(client
     assert [s["ts"] for s in body["steps"]] == sorted(s["ts"] for s in body["steps"])
 
 
+def test_execute_failed_surfaces_its_reason_like_debtor_refused_already_does():
+    """Real gap found during Packet 5's UI pass (2026-08-30): the mandate
+    lifecycle stepper's frontend renders ANY step's `detail.reason`
+    generically, but `_mandate_step()`'s own `execute_failed` case dropped
+    the debit-failure reason on the floor — the one thing packet 1's whole
+    taxonomy (insufficient_funds/bank_downtime/mandate_revoked/
+    account_closed_frozen/amount_exceeds_limit) exists to distinguish was
+    invisible on the one screen built to show a mandate's lifecycle. Fixed
+    to match the sibling `debtor_refused` case exactly."""
+    from engine.schemas import AuditEntry
+
+    entry = AuditEntry(
+        id="AE-00099", entity_id="INV-TEST", layer="judgment",
+        summary="mandate_execute_failed: MANDATED -> AT_RISK",
+        detail={"event": "mandate_execute_failed", "payload": {"amount_inr": 40000, "reason": "insufficient_funds"}},
+        ts=dt.datetime(2026, 8, 26, 9, 0, 0),
+    )
+    step, extra = day_story._mandate_step(entry)
+    assert step == "execute_failed"
+    assert extra["reason"] == "insufficient_funds"
+    assert extra["amount_inr"] == 40000
+
+
 def test_mandate_timeline_never_calls_a_simulated_step_real(client):
     body = client.get("/entities/INV-043/mandate-timeline").json()
     registered = next(s for s in body["steps"] if s["step"] == "registered")
